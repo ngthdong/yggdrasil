@@ -1,0 +1,18 @@
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  modernize-*,
+
+  -modernize-use-trailing-return-type,
+
+  readability-*,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+
+  cppcoreguidelines-*,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-avoid-magic-numbers
+
+HeaderFilterRegex: '^(include|src|tests)/'
+WarningsAsErrors: ''
