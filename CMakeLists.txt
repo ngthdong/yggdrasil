@@ -27,6 +27,7 @@ engine_enable_sanitizers(yggdrasil_project_options)
 # Library
 add_library(yggdrasil
     src/database.cc
+    src/storage/disk/disk_manager.cc
 )
 
 target_include_directories(yggdrasil
@@ -36,6 +37,19 @@ target_include_directories(yggdrasil
 
 target_link_libraries(yggdrasil
     PRIVATE
+        yggdrasil_project_options
+)
+
+add_executable(page_dump tools/page_dump.cc )
+target_link_libraries(page_dump PRIVATE yggdrasil yggdrasil_project_options)
+
+add_executable(create_db
+    tools/create_db.cc
+)
+
+target_link_libraries(create_db
+    PRIVATE
+        yggdrasil
         yggdrasil_project_options
 )
 
@@ -58,6 +72,7 @@ if(ENGINE_BUILD_TESTS)
 
     add_executable(yggdrasil_unit_tests
         tests/unit/database_test.cc
+        tests/unit/storage/disk_manager_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests

@@ -2,7 +2,7 @@ Checks: >
   -*,
   bugprone-*,
   performance-*,
-  
+
   modernize-*,
   -modernize-use-auto,
   -modernize-use-trailing-return-type,
@@ -10,8 +10,13 @@ Checks: >
   readability-*,
   -readability-identifier-length,
   -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-uppercase-literal-suffix,
 
   cppcoreguidelines-*,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-init-variables,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-avoid-magic-numbers

@@ -85,8 +85,9 @@ template <typename T> class StatusOr {
     bool ok() const { return status_.ok(); }
     const Status& status() const { return status_; }
 
-    const T& value() const { return value_; }
-    T& value() { return value_; }
+    const T& value() const& { return value_; }
+    T& value() & { return value_; }
+    T&& value() && { return std::move(value_); }
 
   private:
     Status status_;

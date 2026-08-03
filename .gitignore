@@ -9,9 +9,6 @@ Testing/
 CTestTestfile.cmake
 install_manifest.txt
 
-# Compilation database
-# compile_commands.json
-
 # Editor
 .vscode/
 .idea/
@@ -35,3 +32,6 @@ coverage.xml
 # Sanitizer outputs
 *.profraw
 *.profdata
+
+# Generated database files
+*.db
