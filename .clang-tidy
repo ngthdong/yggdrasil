@@ -1,9 +1,10 @@
 Checks: >
+  -*,
   bugprone-*,
-  clang-analyzer-*,
   performance-*,
+  
   modernize-*,
-
+  -modernize-use-auto,
   -modernize-use-trailing-return-type,
 
   readability-*,
@@ -11,8 +12,14 @@ Checks: >
   -readability-magic-numbers,
 
   cppcoreguidelines-*,
-  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-avoid-magic-numbers
 
 HeaderFilterRegex: '^(include|src|tests)/'
+
 WarningsAsErrors: ''
+
+CheckOptions:
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: "0"
