@@ -28,6 +28,7 @@ engine_enable_sanitizers(yggdrasil_project_options)
 add_library(yggdrasil
     src/database.cc
     src/storage/disk/disk_manager.cc
+    src/storage/page/slotted_page.cc
 )
 
 target_include_directories(yggdrasil
@@ -73,6 +74,7 @@ if(ENGINE_BUILD_TESTS)
     add_executable(yggdrasil_unit_tests
         tests/unit/database_test.cc
         tests/unit/storage/disk_manager_test.cc
+        tests/unit/storage/slotted_page_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
