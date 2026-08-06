@@ -29,6 +29,7 @@ add_library(yggdrasil
     src/database.cc
     src/storage/disk/disk_manager.cc
     src/storage/page/slotted_page.cc
+    src/storage/buffer/buffer_pool_manager.cc
 )
 
 target_include_directories(yggdrasil
@@ -75,6 +76,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/database_test.cc
         tests/unit/storage/disk_manager_test.cc
         tests/unit/storage/slotted_page_test.cc
+        tests/unit/storage/buffer_pool_manager_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
