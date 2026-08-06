@@ -17,7 +17,8 @@ Status ErrnoStatus(const std::string& what, int err) {
 } // namespace
 
 StatusOr<std::unique_ptr<DiskManager>> DiskManager::Open(const std::string& path,
-                                                         uint32_t page_size, bool create_if_missing,
+                                                         uint32_t page_size,
+                                                         bool create_if_missing,
                                                          SyncPolicy sync_policy) {
     int flags = O_RDWR;
     if (create_if_missing) {

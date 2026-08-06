@@ -18,8 +18,12 @@ class Database {
     Status Open();
     Status Close();
 
-    bool is_open() const { return is_open_; }
-    const Options& options() const { return options_; }
+    bool is_open() const {
+        return is_open_;
+    }
+    const Options& options() const {
+        return options_;
+    }
 
   private:
     Options options_;

@@ -123,6 +123,7 @@ if(CLANG_TIDY_EXE)
         COMMAND
             ${CLANG_TIDY_EXE}
             -quiet
+            -fix
             -p=${PROJECT_BINARY_DIR}
             ${TIDY_FILES}
         COMMENT "Running clang-tidy"

@@ -60,8 +60,12 @@ class SlottedPage {
     void Compact();
 
   private:
-    uint32_t SlotOffset(slot_id_t slot_id) const { return kHeaderSize + slot_id * kSlotEntrySize; }
-    uint32_t SlotDirectoryEnd() const { return kHeaderSize + num_slots() * kSlotEntrySize; }
+    uint32_t SlotOffset(slot_id_t slot_id) const {
+        return kHeaderSize + slot_id * kSlotEntrySize;
+    }
+    uint32_t SlotDirectoryEnd() const {
+        return kHeaderSize + num_slots() * kSlotEntrySize;
+    }
 
     void set_num_slots(uint16_t n);
     void set_free_space_offset(uint16_t off);

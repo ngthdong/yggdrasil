@@ -22,25 +22,41 @@ class Status {
 
     Status() : code_(Code::kOk) {}
 
-    static Status OK() { return Status(); }
+    static Status OK() {
+        return Status();
+    }
 
-    static Status NotFound(std::string msg) { return Status(Code::kNotFound, std::move(msg)); }
-    static Status Corruption(std::string msg) { return Status(Code::kCorruption, std::move(msg)); }
-    static Status IOError(std::string msg) { return Status(Code::kIOError, std::move(msg)); }
+    static Status NotFound(std::string msg) {
+        return Status(Code::kNotFound, std::move(msg));
+    }
+    static Status Corruption(std::string msg) {
+        return Status(Code::kCorruption, std::move(msg));
+    }
+    static Status IOError(std::string msg) {
+        return Status(Code::kIOError, std::move(msg));
+    }
     static Status InvalidArgument(std::string msg) {
         return Status(Code::kInvalidArgument, std::move(msg));
     }
     static Status ResourceExhausted(std::string msg) {
         return Status(Code::kResourceExhausted, std::move(msg));
     }
-    static Status Aborted(std::string msg) { return Status(Code::kAborted, std::move(msg)); }
+    static Status Aborted(std::string msg) {
+        return Status(Code::kAborted, std::move(msg));
+    }
     static Status NotSupported(std::string msg) {
         return Status(Code::kNotSupported, std::move(msg));
     }
 
-    bool ok() const { return code_ == Code::kOk; }
-    Code code() const { return code_; }
-    const std::string& message() const { return message_; }
+    bool ok() const {
+        return code_ == Code::kOk;
+    }
+    Code code() const {
+        return code_;
+    }
+    const std::string& message() const {
+        return message_;
+    }
 
     std::string ToString() const {
         if (ok())
@@ -82,12 +98,22 @@ template <typename T> class StatusOr {
     StatusOr(Status status) : status_(std::move(status)) {}
     StatusOr(T value) : status_(Status::OK()), value_(std::move(value)) {}
 
-    bool ok() const { return status_.ok(); }
-    const Status& status() const { return status_; }
+    bool ok() const {
+        return status_.ok();
+    }
+    const Status& status() const {
+        return status_;
+    }
 
-    const T& value() const& { return value_; }
-    T& value() & { return value_; }
-    T&& value() && { return std::move(value_); }
+    const T& value() const& {
+        return value_;
+    }
+    T& value() & {
+        return value_;
+    }
+    T&& value() && {
+        return std::move(value_);
+    }
 
   private:
     Status status_;

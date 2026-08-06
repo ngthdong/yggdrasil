@@ -18,7 +18,9 @@ class DiskManagerTest : public ::testing::Test {
         path_ = "test_diskmanager_" + std::to_string(::getpid()) + ".db";
         std::remove(path_.c_str());
     }
-    void TearDown() override { std::remove(path_.c_str()); }
+    void TearDown() override {
+        std::remove(path_.c_str());
+    }
 
     std::string path_;
 };

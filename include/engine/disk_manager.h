@@ -24,7 +24,9 @@ class DiskManager {
     // On an existing file, reads and validates the superblock, failing with
     // Corruption if the magic/version/size don't check out.
     static StatusOr<std::unique_ptr<DiskManager>>
-    Open(const std::string& path, uint32_t page_size, bool create_if_missing,
+    Open(const std::string& path,
+         uint32_t page_size,
+         bool create_if_missing,
          SyncPolicy sync_policy = SyncPolicy::kEveryWrite);
 
     ~DiskManager();
@@ -41,8 +43,12 @@ class DiskManager {
     // Extends the file by one zero-filled page.
     StatusOr<page_id_t> AllocatePage();
 
-    uint32_t GetNumPages() const { return superblock_.page_count; }
-    uint32_t page_size() const { return superblock_.page_size; }
+    uint32_t GetNumPages() const {
+        return superblock_.page_count;
+    }
+    uint32_t page_size() const {
+        return superblock_.page_size;
+    }
 
     Status Shutdown();
 

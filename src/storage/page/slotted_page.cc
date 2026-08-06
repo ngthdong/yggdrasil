@@ -16,12 +16,22 @@ void SlottedPage::InitNewPage(char* buf, uint32_t page_size, page_id_t page_id) 
     PutU32(buf + 8, 0);
 }
 
-page_id_t SlottedPage::page_id() const { return GetI32(buf_ + 0); }
-uint16_t SlottedPage::num_slots() const { return GetU16(buf_ + 4); }
-uint16_t SlottedPage::free_space_offset() const { return GetU16(buf_ + 6); }
+page_id_t SlottedPage::page_id() const {
+    return GetI32(buf_ + 0);
+}
+uint16_t SlottedPage::num_slots() const {
+    return GetU16(buf_ + 4);
+}
+uint16_t SlottedPage::free_space_offset() const {
+    return GetU16(buf_ + 6);
+}
 
-void SlottedPage::set_num_slots(uint16_t n) { PutU16(buf_ + 4, n); }
-void SlottedPage::set_free_space_offset(uint16_t off) { PutU16(buf_ + 6, off); }
+void SlottedPage::set_num_slots(uint16_t n) {
+    PutU16(buf_ + 4, n);
+}
+void SlottedPage::set_free_space_offset(uint16_t off) {
+    PutU16(buf_ + 6, off);
+}
 
 uint32_t SlottedPage::FreeSpaceContiguous() const {
     uint32_t dir_end = SlotDirectoryEnd();
