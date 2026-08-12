@@ -28,6 +28,7 @@ engine_enable_sanitizers(yggdrasil_project_options)
 add_library(yggdrasil
     src/database.cc
     src/storage/disk/disk_manager.cc
+    src/storage/freespace/free_page_manager.cc
     src/storage/page/slotted_page.cc
     src/buffer/buffer_pool_manager.cc
     src/buffer/replacer/clock_replacer.cc
@@ -77,6 +78,7 @@ if(ENGINE_BUILD_TESTS)
     add_executable(yggdrasil_unit_tests
         tests/unit/database_test.cc
         tests/unit/storage/disk/disk_manager_test.cc
+        tests/unit/storage/freespace/free_page_manager_test.cc
         tests/unit/storage/page/slotted_page_test.cc
         tests/unit/buffer/buffer_pool_manager_test.cc
         tests/unit/buffer/replacer/clock_replacer_test.cc

@@ -50,6 +50,22 @@ class DiskManager {
         return superblock_.page_size;
     }
 
+    page_id_t GetFreeListHead() const {
+        return superblock_.free_list_head_page_id;
+    }
+    Status SetFreeListHead(page_id_t head) {
+        superblock_.free_list_head_page_id = head;
+        return WriteSuperblock();
+    }
+
+    page_id_t GetRootPageId() const {
+        return superblock_.root_page_id;
+    }
+    Status SetRootPageId(page_id_t root) {
+        superblock_.root_page_id = root;
+        return WriteSuperblock();
+    }
+
     Status Shutdown();
 
   private:
@@ -57,6 +73,8 @@ class DiskManager {
 
     Status WriteSuperblock();
     Status SyncIfNeeded();
+
+    // Wrappers around pread/pwrite that loop on short reads/writes
     Status PreadFull(void* buf, size_t count, off_t offset) const;
     Status PwriteFull(const void* buf, size_t count, off_t offset) const;
 
