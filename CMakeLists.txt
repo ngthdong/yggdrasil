@@ -33,6 +33,8 @@ add_library(yggdrasil
     src/buffer/buffer_pool_manager.cc
     src/buffer/replacer/clock_replacer.cc
     src/buffer/replacer/lru_replacer.cc
+    src/index/bptree/b_plus_tree.cc
+    src/index/bptree/bptree_leaf_page.cc
 )
 
 target_include_directories(yggdrasil
@@ -83,6 +85,8 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/buffer/buffer_pool_manager_test.cc
         tests/unit/buffer/replacer/clock_replacer_test.cc
         tests/unit/buffer/replacer/lru_replacer_test.cc
+        tests/unit/index/bptree/bptree_leaf_page_test.cc
+        tests/unit/index/bptree/bptree_point_lookup_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
