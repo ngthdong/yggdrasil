@@ -6,9 +6,15 @@
 
 #include "engine/config.h"
 #include "engine/disk_manager.h"
+#include "engine/replacer.h"
 #include "engine/status.h"
 
 namespace engine {
+
+enum class ReplacerPolicy {
+    kClock,
+    kLRU,
+};
 
 // BufferPoolManager caches pages in a fixed-size array of frames, sitting
 // between the B+Tree and DiskManager. It owns all page memory from this
@@ -17,7 +23,9 @@ namespace engine {
 // they hold a pin on it.
 class BufferPoolManager {
   public:
-    BufferPoolManager(DiskManager* disk_manager, size_t num_frames);
+    BufferPoolManager(DiskManager* disk_manager,
+                      size_t num_frames,
+                      ReplacerPolicy policy = ReplacerPolicy::kClock);
 
     BufferPoolManager(const BufferPoolManager&) = delete;
     BufferPoolManager& operator=(const BufferPoolManager&) = delete;
@@ -31,9 +39,11 @@ class BufferPoolManager {
     // pointer to its (zeroed) bytes. *out_page_id receives the new id.
     StatusOr<char*> NewPage(page_id_t* out_page_id);
 
+    // Claims a frame for a page_id the CALLER already determined
+    StatusOr<char*> NewPageWithId(page_id_t page_id);
+
     // Decrements pin count. is_dirty is sticky-OR'd onto the frame's dirty
-    // flag -- once true, stays true until the next successful FlushPage.
-    // InvalidArgument if not resident, or if pin_count is already 0.
+    // flag. When pin_count reaches exactly 0, the frame becomes evictable
     Status UnpinPage(page_id_t page_id, bool is_dirty);
 
     // Writes to disk iff dirty, then clears the flag. Safe with pin_count==0.
@@ -45,17 +55,24 @@ class BufferPoolManager {
     size_t FreeFrameCount() const {
         return free_list_.size();
     }
+    size_t EvictableFrameCount() const {
+        return replacer_->Size();
+    }
     size_t CapacityFrames() const {
         return frames_.size();
     }
     uint32_t page_size() const {
         return page_size_;
     }
+    uint64_t HitCount() const {
+        return hit_count_;
+    }
+    uint64_t MissCount() const {
+        return miss_count_;
+    }
     std::string DebugString() const;
 
   private:
-    using frame_id_t = int32_t;
-
     struct Frame {
         page_id_t page_id = kInvalidPageId;
         size_t pin_count = 0;
@@ -63,12 +80,18 @@ class BufferPoolManager {
         char* data = nullptr;
     };
 
+    StatusOr<frame_id_t> GetFreeFrame();
+    StatusOr<char*> ClaimFrameForNewPage(page_id_t page_id);
+
     DiskManager* disk_manager_; // not owned
     uint32_t page_size_;
     std::vector<char> pool_memory_;
     std::vector<Frame> frames_;
     std::vector<frame_id_t> free_list_;
     std::unordered_map<page_id_t, frame_id_t> page_table_;
+    std::unique_ptr<Replacer> replacer_;
+    uint64_t hit_count_ = 0;
+    uint64_t miss_count_ = 0;
 };
 
 } // namespace engine

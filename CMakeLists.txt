@@ -30,6 +30,8 @@ add_library(yggdrasil
     src/storage/disk/disk_manager.cc
     src/storage/page/slotted_page.cc
     src/storage/buffer/buffer_pool_manager.cc
+    src/storage/buffer/replacer/clock_replacer.cc
+    src/storage/buffer/replacer/lru_replacer.cc
 )
 
 target_include_directories(yggdrasil
@@ -77,6 +79,8 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/storage/disk_manager_test.cc
         tests/unit/storage/slotted_page_test.cc
         tests/unit/storage/buffer_pool_manager_test.cc
+        tests/unit/storage/clock_replacer_test.cc
+        tests/unit/storage/lru_replacer_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests

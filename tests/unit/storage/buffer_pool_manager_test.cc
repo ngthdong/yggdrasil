@@ -377,5 +377,33 @@ TEST_F(BufferPoolManagerTest, EvictionNeverPicksAPinnedFrame) {
     }
 }
 
+TEST_F(BufferPoolManagerTest, ClockPolicySelectableExplicitly) {
+    BufferPoolManager bpm(disk_manager_.get(), 2, ReplacerPolicy::kClock);
+    page_id_t id1;
+    page_id_t id2;
+    page_id_t id3;
+    ASSERT_TRUE(bpm.NewPage(&id1).ok());
+    ASSERT_TRUE(bpm.NewPage(&id2).ok());
+    ASSERT_TRUE(bpm.UnpinPage(id1, false).ok());
+    ASSERT_TRUE(bpm.UnpinPage(id2, false).ok());
+    ASSERT_TRUE(bpm.NewPage(&id3).ok()); // just confirms Clock-backed eviction works end to end
+    EXPECT_EQ(bpm.CapacityFrames(), 2u);
+}
+
+TEST_F(BufferPoolManagerTest, LruPolicySelectableAndEvictsTrueLeastRecentlyUsed) {
+    BufferPoolManager bpm(disk_manager_.get(), 2, ReplacerPolicy::kLRU);
+    page_id_t id1;
+    page_id_t id2;
+    page_id_t id3;
+    ASSERT_TRUE(bpm.NewPage(&id1).ok());
+    ASSERT_TRUE(bpm.NewPage(&id2).ok());
+    ASSERT_TRUE(bpm.UnpinPage(id1, false).ok()); // id1 unpinned first -> LRU victim
+    ASSERT_TRUE(bpm.UnpinPage(id2, false).ok());
+
+    ASSERT_TRUE(bpm.NewPage(&id3).ok());
+    EXPECT_FALSE(bpm.IsResident(id1));
+    EXPECT_TRUE(bpm.IsResident(id2));
+}
+
 } // namespace
 } // namespace engine
