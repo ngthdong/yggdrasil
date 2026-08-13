@@ -86,11 +86,22 @@ def load_files(build_dir):
     with path.open() as file:
         database = json.load(file)
 
+    project_root = Path(__file__).resolve().parent.parent
+
+    source_dirs = {
+        project_root / "src",
+        project_root / "tests",
+    }
+
     return sorted(
         {
             Path(entry["file"]).resolve()
             for entry in database
             if Path(entry["file"]).suffix in {".cc", ".cpp", ".cxx"}
+            and any(
+                source_dir in Path(entry["file"]).resolve().parents
+                for source_dir in source_dirs
+            )
         }
     )
 
