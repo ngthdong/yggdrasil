@@ -35,6 +35,7 @@ add_library(yggdrasil
     src/buffer/replacer/lru_replacer.cc
     src/index/bptree/b_plus_tree.cc
     src/index/bptree/bptree_leaf_page.cc
+    src/index/bptree/bptree_internal_page.cc
 )
 
 target_include_directories(yggdrasil
@@ -87,6 +88,8 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/buffer/replacer/lru_replacer_test.cc
         tests/unit/index/bptree/bptree_leaf_page_test.cc
         tests/unit/index/bptree/bptree_point_lookup_test.cc
+        tests/unit/index/bptree/bptree_internal_page_test.cc
+        tests/unit/index/bptree/bptree_split_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
@@ -125,6 +128,9 @@ find_program(CLANG_TIDY_EXE
     clang-tidy-17
 )
 
+# python-lint-script
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 if(CLANG_TIDY_EXE)
     file(GLOB_RECURSE TIDY_FILES CONFIGURE_DEPENDS
         ${PROJECT_SOURCE_DIR}/src/*.cc
@@ -133,12 +139,22 @@ if(CLANG_TIDY_EXE)
 
     add_custom_target(lint
         COMMAND
-            ${CLANG_TIDY_EXE}
-            -quiet
-            -fix
-            -p=${PROJECT_BINARY_DIR}
-            ${TIDY_FILES}
-        COMMENT "Running clang-tidy"
+            ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/lint.py
+            -p ${PROJECT_BINARY_DIR}
+            -j 8
+        COMMENT "Running clang-tidy in parallel"
+        VERBATIM
+    )
+
+    add_custom_target(lint-diff
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${PROJECT_SOURCE_DIR}/tools/lint.py
+            -p ${PROJECT_BINARY_DIR}
+            -j 8
+            --only-diff
+        COMMENT "Running clang-tidy on changed files"
         VERBATIM
     )
 endif()
