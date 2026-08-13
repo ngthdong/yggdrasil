@@ -38,6 +38,7 @@ class BPlusTree {
 
     StatusOr<std::string> Get(const Slice& key);
     Status Insert(const Slice& key, const Slice& value);
+    Status Remove(const Slice& key);
 
     StatusOr<int> Height();
     Status Verify();
@@ -48,6 +49,11 @@ class BPlusTree {
         bool split_occurred = false;
         std::string split_key;
         page_id_t new_right_child_id = kInvalidPageId;
+    };
+
+    struct RebalanceResult {
+        bool merged = false;       // true: everything ended up in the LEFT page, RIGHT was emptied
+        std::string new_separator; // meaningful only if !merged
     };
 
     StatusOr<page_id_t> GetOrCreateRootLeaf();
@@ -67,11 +73,27 @@ class BPlusTree {
                                                   const Slice& new_key,
                                                   page_id_t new_child_id);
 
+    Status RemoveRecursive(page_id_t page_id, const Slice& key);
+
+    Status MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx);
+
+    StatusOr<RebalanceResult> RebalanceLeafPair(PageGuard& left_guard,
+                                                page_id_t left_id,
+                                                PageGuard& right_guard,
+                                                page_id_t right_id);
+
+    StatusOr<RebalanceResult> RebalanceInternalPair(PageGuard& left_guard,
+                                                    page_id_t left_id,
+                                                    PageGuard& right_guard,
+                                                    page_id_t right_id,
+                                                    const Slice& parent_separator);
+
     Status VerifyRecursive(page_id_t page_id,
                            const Slice* min_key,
                            const Slice* max_key,
                            int depth,
                            int* out_leaf_depth);
+
     StatusOr<std::string> ToStringRecursive(page_id_t page_id, int depth);
 
     DiskManager* disk_manager_;

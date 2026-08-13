@@ -52,6 +52,21 @@ class BPlusTreeInternalPage {
     // child_id becomes ChildAt(index+1), key becomes KeyAt(index).
     Status InsertEntry(uint16_t index, const Slice& key, page_id_t child_id);
 
+    // Removes entries[index] entirely, both KeyAt(index) and its paired
+    // child ChildAt(index+1). Shifting entries after it left by one.
+    Status RemoveEntry(uint16_t index);
+
+    // Repoints KeyAt(index) to a new value in place, used when
+    // redistribution changes which key separates two children. Allocates
+    // a fresh record for the new key rather than reusing the old one's
+    // space. The old record's bytes become dead space,
+    Status UpdateKeyAt(uint16_t index, const Slice& new_key);
+
+    // Rebuilds from current live entries, reclaiming dead space left by
+    // past RemoveEntry/UpdateKeyAt calls. Auto-invoked by InsertEntry and
+    // UpdateKeyAt when they'd otherwise fail
+    void Compact();
+
     uint32_t OccupiedBytes() const {
         uint32_t total = kHeaderSize + num_keys() * kEntrySize;
         for (uint16_t i = 0; i < num_keys(); ++i) {
@@ -64,6 +79,10 @@ class BPlusTreeInternalPage {
     }
 
   private:
+    // Appends an entry directly at the end with NO shift.
+    // It's used only by Compact().
+    void AppendEntryUnchecked(const Slice& key, page_id_t child_id);
+
     uint32_t EntryOffset(uint16_t index) const {
         return kHeaderSize + index * kEntrySize;
     }

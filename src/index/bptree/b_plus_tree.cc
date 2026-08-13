@@ -238,7 +238,7 @@ StatusOr<BPlusTree::InsertResult> BPlusTree::SplitLeafAndInsert(PageGuard& leaf_
 }
 
 StatusOr<BPlusTree::InsertResult> BPlusTree::SplitInternalAndInsert(PageGuard& internal_guard,
-                                                                    page_id_t page_id, 
+                                                                    page_id_t page_id,
                                                                     uint16_t insert_idx,
                                                                     const Slice& new_key,
                                                                     page_id_t new_child_id) {
@@ -301,6 +301,269 @@ StatusOr<BPlusTree::InsertResult> BPlusTree::SplitInternalAndInsert(PageGuard& i
     return InsertResult{true, promoted_key, new_internal_id};
 }
 
+Status BPlusTree::Remove(const Slice& key) {
+    if (IsEmpty()) {
+        return Status::NotFound("BPlusTree::Remove: tree is empty");
+    }
+    page_id_t root_id = disk_manager_->GetRootPageId();
+
+    Status s = RemoveRecursive(root_id, key);
+    if (!s.ok()) {
+        return s;
+    }
+
+    StatusOr<PageGuard> root_guard_or = FetchPageGuarded(buffer_pool_manager_, root_id);
+    if (!root_guard_or.ok()) {
+        return root_guard_or.status();
+    }
+    PageGuard root_guard = std::move(root_guard_or.value());
+
+    if (PeekPageType(root_guard.data()) == PageType::kBTreeLeaf) {
+        BPlusTreeLeafPage leaf(root_guard.mutable_data(), buffer_pool_manager_->page_size());
+        if (leaf.num_keys() == 0) {
+            root_guard.Reset(); // unpin before deallocating -- project-wide rule
+            Status dealloc_s = free_page_manager_->DeallocatePage(root_id);
+            if (!dealloc_s.ok()) {
+                return dealloc_s;
+            }
+            return disk_manager_->SetRootPageId(kInvalidPageId);
+        }
+        return Status::OK();
+    }
+
+    BPlusTreeInternalPage internal(root_guard.mutable_data(), buffer_pool_manager_->page_size());
+    if (internal.num_keys() == 0) {
+        page_id_t only_child = internal.ChildAt(0);
+        root_guard.Reset();
+        Status dealloc_s = free_page_manager_->DeallocatePage(root_id);
+        if (!dealloc_s.ok()) {
+            return dealloc_s;
+        }
+        return disk_manager_->SetRootPageId(only_child);
+    }
+    return Status::OK();
+}
+
+Status BPlusTree::RemoveRecursive(page_id_t page_id, const Slice& key) {
+    StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, page_id);
+    if (!guard_or.ok()) {
+        return guard_or.status();
+    }
+    PageGuard guard = std::move(guard_or.value());
+
+    if (PeekPageType(guard.data()) == PageType::kBTreeLeaf) {
+        BPlusTreeLeafPage leaf(guard.mutable_data(), buffer_pool_manager_->page_size());
+        Status s = leaf.Remove(key, comparator_);
+        if (s.ok()) {
+            guard.MarkDirty();
+        }
+        return s;
+    }
+
+    BPlusTreeInternalPage internal(guard.mutable_data(), buffer_pool_manager_->page_size());
+    uint16_t child_idx = internal.FindChildIndex(key, comparator_);
+    page_id_t child_id = internal.ChildAt(child_idx);
+
+    Status s = RemoveRecursive(child_id, key);
+    if (!s.ok()) {
+        return s;
+    }
+
+    return MaybeRebalanceChild(guard, child_idx);
+}
+
+Status BPlusTree::MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx) {
+    BPlusTreeInternalPage parent(parent_guard.mutable_data(), buffer_pool_manager_->page_size());
+    page_id_t child_id = parent.ChildAt(child_idx);
+
+    StatusOr<PageGuard> child_guard_or = FetchPageGuarded(buffer_pool_manager_, child_id);
+    if (!child_guard_or.ok()) {
+        return child_guard_or.status();
+    }
+    PageGuard child_guard = std::move(child_guard_or.value());
+
+    bool child_is_leaf = PeekPageType(child_guard.data()) == PageType::kBTreeLeaf;
+    bool underflow =
+        child_is_leaf
+            ? BPlusTreeLeafPage(child_guard.mutable_data(), buffer_pool_manager_->page_size())
+                  .IsUnderflow()
+            : BPlusTreeInternalPage(child_guard.mutable_data(), buffer_pool_manager_->page_size())
+                  .IsUnderflow();
+    if (!underflow) {
+        return Status::OK();
+    }
+
+    bool has_left = child_idx > 0;
+    uint16_t sibling_idx =
+        has_left ? static_cast<uint16_t>(child_idx - 1) : static_cast<uint16_t>(child_idx + 1);
+    page_id_t sibling_id = parent.ChildAt(sibling_idx);
+
+    StatusOr<PageGuard> sibling_guard_or = FetchPageGuarded(buffer_pool_manager_, sibling_id);
+    if (!sibling_guard_or.ok()) {
+        return sibling_guard_or.status();
+    }
+    PageGuard sibling_guard = std::move(sibling_guard_or.value());
+
+    // Normalize to physical left/right regardless of which side the
+    // sibling was on the rebalance helpers are direction-agnostic.
+    bool sibling_is_left = has_left;
+    page_id_t left_id = sibling_is_left ? sibling_id : child_id;
+    page_id_t right_id = sibling_is_left ? child_id : sibling_id;
+    PageGuard& left_guard = sibling_is_left ? sibling_guard : child_guard;
+    PageGuard& right_guard = sibling_is_left ? child_guard : sibling_guard;
+    uint16_t separator_idx = std::min(child_idx, sibling_idx);
+
+    StatusOr<RebalanceResult> result_or =
+        child_is_leaf
+            ? RebalanceLeafPair(left_guard, left_id, right_guard, right_id)
+            : RebalanceInternalPair(
+                  left_guard, left_id, right_guard, right_id, parent.KeyAt(separator_idx));
+    if (!result_or.ok()) {
+        return result_or.status();
+    }
+    RebalanceResult result = result_or.value();
+
+    if (result.merged) {
+        right_guard.Reset(); // unpin before deallocating
+        Status dealloc_s = free_page_manager_->DeallocatePage(right_id);
+        if (!dealloc_s.ok()) {
+            return dealloc_s;
+        }
+        Status remove_s = parent.RemoveEntry(separator_idx);
+        if (!remove_s.ok()) {
+            return remove_s;
+        }
+        parent_guard.MarkDirty();
+        return Status::OK();
+    }
+    Status update_s = parent.UpdateKeyAt(separator_idx, Slice(result.new_separator));
+    if (!update_s.ok()) {
+        return update_s;
+    }
+    parent_guard.MarkDirty();
+    return Status::OK();
+}
+
+StatusOr<BPlusTree::RebalanceResult> BPlusTree::RebalanceLeafPair(PageGuard& left_guard,
+                                                                  page_id_t left_id,
+                                                                  PageGuard& right_guard,
+                                                                  page_id_t right_id) {
+    BPlusTreeLeafPage left(left_guard.mutable_data(), buffer_pool_manager_->page_size());
+    BPlusTreeLeafPage right(right_guard.mutable_data(), buffer_pool_manager_->page_size());
+
+    page_id_t old_right_next = right.next_leaf_page_id(); // capture before any mutation
+    std::vector<std::pair<std::string, std::string>> all;
+    for (uint16_t i = 0; i < left.num_keys(); ++i) {
+        all.emplace_back(left.KeyAt(i).ToString(), left.ValueAt(i).ToString());
+    }
+    for (uint16_t i = 0; i < right.num_keys(); ++i) {
+        all.emplace_back(right.KeyAt(i).ToString(), right.ValueAt(i).ToString());
+    }
+    BPlusTreeLeafPage::InitNewPage(
+        left_guard.mutable_data(), buffer_pool_manager_->page_size(), left_id);
+    bool merge_ok = true;
+    for (const auto& [k, v] : all) {
+        if (!left.Insert(Slice(k), Slice(v), comparator_).ok()) {
+            merge_ok = false;
+            break;
+        }
+    }
+    if (merge_ok) {
+        left.SetNextLeafPageId(old_right_next);
+        left_guard.MarkDirty();
+        return RebalanceResult{true, ""};
+    }
+
+    BPlusTreeLeafPage::InitNewPage(
+        left_guard.mutable_data(), buffer_pool_manager_->page_size(), left_id);
+    BPlusTreeLeafPage::InitNewPage(
+        right_guard.mutable_data(), buffer_pool_manager_->page_size(), right_id);
+    uint16_t total = static_cast<uint16_t>(all.size());
+    uint16_t mid = total / 2;
+    for (uint16_t i = 0; i < mid; ++i) {
+        Status s = left.Insert(Slice(all[i].first), Slice(all[i].second), comparator_);
+        if (!s.ok()) {
+            return s;
+        }
+    }
+    for (uint16_t i = mid; i < total; ++i) {
+        Status s = right.Insert(Slice(all[i].first), Slice(all[i].second), comparator_);
+        if (!s.ok()) {
+            return s;
+        }
+    }
+    right.SetNextLeafPageId(old_right_next);
+    left.SetNextLeafPageId(right_id);
+    left_guard.MarkDirty();
+    right_guard.MarkDirty();
+
+    return RebalanceResult{false, all[mid].first};
+}
+
+StatusOr<BPlusTree::RebalanceResult>
+BPlusTree::RebalanceInternalPair(PageGuard& left_guard,
+                                 page_id_t left_id,
+                                 PageGuard& right_guard,
+                                 page_id_t right_id,
+                                 const Slice& parent_separator) {
+    BPlusTreeInternalPage left(left_guard.mutable_data(), buffer_pool_manager_->page_size());
+    BPlusTreeInternalPage right(right_guard.mutable_data(), buffer_pool_manager_->page_size());
+
+    std::vector<page_id_t> children;
+    std::vector<std::string> keys;
+    children.push_back(left.ChildAt(0));
+    for (uint16_t i = 0; i < left.num_keys(); ++i) {
+        keys.push_back(left.KeyAt(i).ToString());
+        children.push_back(left.ChildAt(static_cast<uint16_t>(i + 1)));
+    }
+    keys.push_back(parent_separator.ToString()); // pulled down from the parent
+    children.push_back(right.ChildAt(0));
+    for (uint16_t i = 0; i < right.num_keys(); ++i) {
+        keys.push_back(right.KeyAt(i).ToString());
+        children.push_back(right.ChildAt(static_cast<uint16_t>(i + 1)));
+    }
+
+    uint16_t total_keys = static_cast<uint16_t>(keys.size());
+
+    BPlusTreeInternalPage::InitNewPage(
+        left_guard.mutable_data(), buffer_pool_manager_->page_size(), left_id, children[0]);
+    bool merge_ok = true;
+    for (uint16_t i = 0; i < total_keys; ++i) {
+        if (!left.InsertEntry(i, Slice(keys[i]), children[i + 1]).ok()) {
+            merge_ok = false;
+            break;
+        }
+    }
+    if (merge_ok) {
+        left_guard.MarkDirty();
+        return RebalanceResult{true, ""};
+    }
+
+    uint16_t mid = total_keys / 2;
+    BPlusTreeInternalPage::InitNewPage(
+        left_guard.mutable_data(), buffer_pool_manager_->page_size(), left_id, children[0]);
+    BPlusTreeInternalPage::InitNewPage(
+        right_guard.mutable_data(), buffer_pool_manager_->page_size(), right_id, children[mid + 1]);
+    for (uint16_t i = 0; i < mid; ++i) {
+        Status s = left.InsertEntry(i, Slice(keys[i]), children[i + 1]);
+        if (!s.ok()) {
+            return s;
+        }
+    }
+    for (uint16_t i = static_cast<uint16_t>(mid + 1); i < total_keys; ++i) {
+        Status s = right.InsertEntry(
+            static_cast<uint16_t>(i - (mid + 1)), Slice(keys[i]), children[i + 1]);
+        if (!s.ok()) {
+            return s;
+        }
+    }
+    left_guard.MarkDirty();
+    right_guard.MarkDirty();
+
+    // keys[mid] is pulled UP to become the new parent separator
+    return RebalanceResult{false, keys[mid]};
+}
+
 StatusOr<int> BPlusTree::Height() {
     if (IsEmpty()) {
         return 0;
@@ -331,11 +594,7 @@ Status BPlusTree::Verify() {
 }
 
 Status BPlusTree::VerifyRecursive(
-    page_id_t page_id, 
-    const Slice* min_key, 
-    const Slice* max_key, 
-    int depth, 
-    int* out_leaf_depth) {
+    page_id_t page_id, const Slice* min_key, const Slice* max_key, int depth, int* out_leaf_depth) {
     StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, page_id);
     if (!guard_or.ok()) {
         return guard_or.status();

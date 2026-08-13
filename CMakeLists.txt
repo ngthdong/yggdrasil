@@ -90,6 +90,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/index/bptree/bptree_point_lookup_test.cc
         tests/unit/index/bptree/bptree_internal_page_test.cc
         tests/unit/index/bptree/bptree_split_test.cc
+        tests/unit/index/bptree/bptree_delete_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests

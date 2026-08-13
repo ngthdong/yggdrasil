@@ -1,8 +1,8 @@
 #include <cstdio>
+#include <format>
 #include <gtest/gtest.h>
 #include <map>
 #include <random>
-#include <format>
 
 #include "engine/b_plus_tree.h"
 
@@ -125,7 +125,7 @@ TEST_F(BPlusTreeSplitTest, PersistsAcrossReopenAfterMultipleSplits) {
 
         ASSERT_TRUE(tree_->Insert(Slice(key), Slice(value)).ok());
     }
-    
+
     int height_before = tree_->Height().value();
     ASSERT_GT(height_before, 1);
     ASSERT_TRUE(bpm_->FlushAllPages().ok());

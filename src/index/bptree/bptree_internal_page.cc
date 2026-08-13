@@ -7,7 +7,7 @@
 namespace engine {
 
 void BPlusTreeInternalPage::InitNewPage(char* buf,
-                                        uint32_t page_size, 
+                                        uint32_t page_size,
                                         page_id_t page_id,
                                         page_id_t leftmost_child_id) {
     PutI32(buf + 0, page_id);
@@ -79,8 +79,9 @@ Status BPlusTreeInternalPage::InsertEntry(uint16_t index, const Slice& key, page
     uint32_t record_size = 2 + static_cast<uint32_t>(key.size());
     uint32_t needed = record_size + kEntrySize;
     if (needed > FreeSpaceContiguous()) {
+        Compact();
         return Status::ResourceExhausted(
-            "BPlusTreeInternalPage::InsertEntry: internal page full -- caller must split");
+            "BPlusTreeInternalPage::InsertEntry: internal page full, caller must split");
     }
 
     uint16_t new_offset = static_cast<uint16_t>(free_space_offset() - record_size);
@@ -103,6 +104,71 @@ Status BPlusTreeInternalPage::InsertEntry(uint16_t index, const Slice& key, page
     set_num_keys(static_cast<uint16_t>(n + 1));
     set_free_space_offset(new_offset);
     return Status::OK();
+}
+
+Status BPlusTreeInternalPage::RemoveEntry(uint16_t index) {
+    uint16_t n = num_keys();
+    for (uint16_t i = index; static_cast<uint16_t>(i + 1) < n; ++i) {
+        uint32_t src = EntryOffset(static_cast<uint16_t>(i + 1));
+        uint32_t dst = EntryOffset(i);
+        uint16_t off = GetU16(buf_ + src);
+        page_id_t cid = GetI32(buf_ + src + 2);
+        PutU16(buf_ + dst, off);
+        PutI32(buf_ + dst + 2, cid);
+    }
+    set_num_keys(static_cast<uint16_t>(n - 1));
+    return Status::OK();
+}
+
+Status BPlusTreeInternalPage::UpdateKeyAt(uint16_t index, const Slice& new_key) {
+    uint32_t needed = 2 + static_cast<uint32_t>(new_key.size());
+    if (needed > FreeSpaceContiguous()) {
+        Compact();
+        if (needed > FreeSpaceContiguous()) {
+            return Status::ResourceExhausted(
+                "BPlusTreeInternalPage::UpdateKeyAt: no room for the new key's "
+                "record even after compaction");
+        }
+    }
+    uint16_t new_offset = static_cast<uint16_t>(free_space_offset() - needed);
+    PutU16(buf_ + new_offset, static_cast<uint16_t>(new_key.size()));
+    std::memcpy(buf_ + new_offset + 2, new_key.data(), new_key.size());
+
+    uint32_t entry_off = EntryOffset(index);
+    PutU16(buf_ + entry_off, new_offset); // repoint the directory entry only
+    set_free_space_offset(new_offset);
+    return Status::OK();
+}
+
+void BPlusTreeInternalPage::Compact() {
+    uint16_t n = num_keys();
+    page_id_t saved_leftmost = ChildAt(0);
+    std::vector<std::pair<std::string, page_id_t>> entries;
+    entries.reserve(n);
+    for (uint16_t i = 0; i < n; ++i) {
+        entries.emplace_back(KeyAt(i).ToString(), ChildAt(static_cast<uint16_t>(i + 1)));
+    }
+    page_id_t saved_id = page_id();
+
+    InitNewPage(buf_, page_size_, saved_id, saved_leftmost);
+    for (const auto& [k, child] : entries) {
+        AppendEntryUnchecked(Slice(k), child);
+    }
+}
+
+void BPlusTreeInternalPage::AppendEntryUnchecked(const Slice& key, page_id_t child_id) {
+    uint32_t record_size = 2 + static_cast<uint32_t>(key.size());
+    uint16_t new_offset = static_cast<uint16_t>(free_space_offset() - record_size);
+    PutU16(buf_ + new_offset, static_cast<uint16_t>(key.size()));
+    std::memcpy(buf_ + new_offset + 2, key.data(), key.size());
+
+    uint16_t n = num_keys();
+    uint32_t entry_off = EntryOffset(n); // always at the end, no shift needed
+    PutU16(buf_ + entry_off, new_offset);
+    PutI32(buf_ + entry_off + 2, child_id);
+
+    set_num_keys(static_cast<uint16_t>(n + 1));
+    set_free_space_offset(new_offset);
 }
 
 } // namespace engine
