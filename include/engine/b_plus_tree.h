@@ -3,10 +3,12 @@
 #include <functional>
 #include <string>
 
+#include "engine/bptree_internal_page.h"
 #include "engine/bptree_leaf_page.h"
 #include "engine/buffer_pool_manager.h"
 #include "engine/disk_manager.h"
 #include "engine/free_page_manager.h"
+#include "engine/page_guard.h"
 #include "engine/slice.h"
 #include "engine/status.h"
 
@@ -37,8 +39,40 @@ class BPlusTree {
     StatusOr<std::string> Get(const Slice& key);
     Status Insert(const Slice& key, const Slice& value);
 
+    StatusOr<int> Height();
+    Status Verify();
+    StatusOr<std::string> ToString();
+
   private:
+    struct InsertResult {
+        bool split_occurred = false;
+        std::string split_key;
+        page_id_t new_right_child_id = kInvalidPageId;
+    };
+
     StatusOr<page_id_t> GetOrCreateRootLeaf();
+
+    StatusOr<page_id_t> DescendToLeaf(const Slice* key);
+
+    StatusOr<InsertResult> InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value);
+
+    StatusOr<InsertResult> SplitLeafAndInsert(PageGuard& leaf_guard,
+                                              page_id_t page_id,
+                                              const Slice& key,
+                                              const Slice& value);
+
+    StatusOr<InsertResult> SplitInternalAndInsert(PageGuard& internal_guard,
+                                                  page_id_t page_id,
+                                                  uint16_t insert_idx,
+                                                  const Slice& new_key,
+                                                  page_id_t new_child_id);
+
+    Status VerifyRecursive(page_id_t page_id,
+                           const Slice* min_key,
+                           const Slice* max_key,
+                           int depth,
+                           int* out_leaf_depth);
+    StatusOr<std::string> ToStringRecursive(page_id_t page_id, int depth);
 
     DiskManager* disk_manager_;
     BufferPoolManager* buffer_pool_manager_;
