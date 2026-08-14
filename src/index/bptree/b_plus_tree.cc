@@ -125,6 +125,56 @@ StatusOr<page_id_t> BPlusTree::DescendToLeaf(const Slice* key) {
     }
 }
 
+StatusOr<BPlusTree::Iterator> BPlusTree::Begin() {
+    if (IsEmpty()) {
+        return Iterator();
+    }
+
+    StatusOr<page_id_t> leaf_id_or = DescendToLeaf(nullptr);
+    if (!leaf_id_or.ok()) {
+        return leaf_id_or.status();
+    }
+
+    StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, leaf_id_or.value());
+    if (!guard_or.ok()) {
+        return guard_or.status();
+    }
+
+    Iterator it(buffer_pool_manager_, std::move(guard_or.value()), 0);
+    Status s = it.AdvancePastEndIfNeeded();
+    if (!s.ok()) {
+        return s;
+    }
+    return it;
+}
+
+StatusOr<BPlusTree::Iterator> BPlusTree::Begin(const Slice& start_key) {
+    if (IsEmpty()) {
+        return Iterator();
+    }
+
+    StatusOr<page_id_t> leaf_id_or = DescendToLeaf(&start_key);
+    if (!leaf_id_or.ok()) {
+        return leaf_id_or.status();
+    }
+
+    StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, leaf_id_or.value());
+    if (!guard_or.ok()) {
+        return guard_or.status();
+    }
+    PageGuard guard = std::move(guard_or.value());
+
+    BPlusTreeLeafPage leaf(guard.mutable_data(), buffer_pool_manager_->page_size());
+    BPlusTreeLeafPage::SearchResult result = leaf.FindKey(start_key, comparator_);
+
+    Iterator it(buffer_pool_manager_, std::move(guard), result.index);
+    Status s = it.AdvancePastEndIfNeeded();
+    if (!s.ok()) {
+        return s;
+    }
+    return it;
+}
+
 StatusOr<BPlusTree::InsertResult>
 BPlusTree::InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value) {
     StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, page_id);

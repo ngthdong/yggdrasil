@@ -36,6 +36,7 @@ add_library(yggdrasil
     src/index/bptree/b_plus_tree.cc
     src/index/bptree/bptree_leaf_page.cc
     src/index/bptree/bptree_internal_page.cc
+    src/index/bptree/bptree_iterator.cc
 )
 
 target_include_directories(yggdrasil
@@ -91,6 +92,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/index/bptree/bptree_internal_page_test.cc
         tests/unit/index/bptree/bptree_split_test.cc
         tests/unit/index/bptree/bptree_delete_test.cc
+        tests/unit/index/bptree/bptree_iterator_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests

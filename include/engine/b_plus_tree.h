@@ -4,6 +4,7 @@
 #include <string>
 
 #include "engine/bptree_internal_page.h"
+#include "engine/bptree_iterator.h"
 #include "engine/bptree_leaf_page.h"
 #include "engine/buffer_pool_manager.h"
 #include "engine/disk_manager.h"
@@ -20,6 +21,7 @@ namespace engine {
 // making a returned Slice invalid.
 class BPlusTree {
   public:
+    using Iterator = BPlusTreeIterator;
     using KeyComparator = std::function<int(const Slice&, const Slice&)>;
     static int DefaultComparator(const Slice& a, const Slice& b) {
         return a.Compare(b);
@@ -39,6 +41,9 @@ class BPlusTree {
     StatusOr<std::string> Get(const Slice& key);
     Status Insert(const Slice& key, const Slice& value);
     Status Remove(const Slice& key);
+
+    StatusOr<Iterator> Begin();
+    StatusOr<Iterator> Begin(const Slice& start_key);
 
     StatusOr<int> Height();
     Status Verify();
