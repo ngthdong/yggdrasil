@@ -79,6 +79,7 @@ if(ENGINE_BUILD_TESTS)
 
     FetchContent_MakeAvailable(googletest)
 
+    # Unit tests
     add_executable(yggdrasil_unit_tests
         tests/unit/database_test.cc
         tests/unit/storage/disk/disk_manager_test.cc
@@ -102,8 +103,21 @@ if(ENGINE_BUILD_TESTS)
             yggdrasil_project_options
     )
 
+    # Integration tests
+    add_executable(yggdrasil_integration_tests
+        tests/integration/database_api_test.cc
+    )
+
+    target_link_libraries(yggdrasil_integration_tests
+        PRIVATE
+            yggdrasil
+            GTest::gtest_main
+            yggdrasil_project_options
+    )
+
     include(GoogleTest)
     gtest_discover_tests(yggdrasil_unit_tests)
+    gtest_discover_tests(yggdrasil_integration_tests)
 endif()
 
 # clang-format

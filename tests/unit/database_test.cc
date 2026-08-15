@@ -1,24 +1,38 @@
 #include "engine/database.h"
 
+#include <cstdio>
 #include <gtest/gtest.h>
 
 namespace engine {
 namespace {
 
-Options ValidOptions() {
-    Options opts;
-    opts.path = "test.db";
-    return opts;
-}
+class DatabaseTest : public ::testing::Test {
+  protected:
+    void SetUp() override {
+        path_ = "test_database_" + std::to_string(::getpid()) + ".db";
+        std::remove(path_.c_str());
+    }
+    void TearDown() override {
+        std::remove(path_.c_str());
+    }
 
-TEST(DatabaseTest, OpenSucceedsWithValidOptions) {
+    Options ValidOptions() {
+        Options opts;
+        opts.path = path_;
+        return opts;
+    }
+
+    std::string path_;
+};
+
+TEST_F(DatabaseTest, OpenSucceedsWithValidOptions) {
     Database db(ValidOptions());
     Status s = db.Open();
     EXPECT_TRUE(s.ok()) << s.ToString();
     EXPECT_TRUE(db.is_open());
 }
 
-TEST(DatabaseTest, OpenRejectsEmptyPath) {
+TEST_F(DatabaseTest, OpenRejectsEmptyPath) {
     Options opts;
     opts.path = "";
     Database db(opts);
@@ -28,7 +42,7 @@ TEST(DatabaseTest, OpenRejectsEmptyPath) {
     EXPECT_FALSE(db.is_open());
 }
 
-TEST(DatabaseTest, OpenRejectsNonPowerOfTwoPageSize) {
+TEST_F(DatabaseTest, OpenRejectsNonPowerOfTwoPageSize) {
     Options opts = ValidOptions();
     opts.page_size = 4000;
     Database db(opts);
@@ -37,14 +51,14 @@ TEST(DatabaseTest, OpenRejectsNonPowerOfTwoPageSize) {
     EXPECT_EQ(s.code(), Status::Code::kInvalidArgument);
 }
 
-TEST(DatabaseTest, DoubleOpenFails) {
+TEST_F(DatabaseTest, DoubleOpenFails) {
     Database db(ValidOptions());
     ASSERT_TRUE(db.Open().ok());
     Status s = db.Open();
     EXPECT_FALSE(s.ok());
 }
 
-TEST(DatabaseTest, CloseThenReopenSucceeds) {
+TEST_F(DatabaseTest, CloseThenReopenSucceeds) {
     Database db(ValidOptions());
     ASSERT_TRUE(db.Open().ok());
     ASSERT_TRUE(db.Close().ok());
@@ -52,12 +66,12 @@ TEST(DatabaseTest, CloseThenReopenSucceeds) {
     EXPECT_TRUE(db.Open().ok());
 }
 
-TEST(DatabaseTest, CloseWithoutOpenIsNotAnError) {
+TEST_F(DatabaseTest, CloseWithoutOpenIsNotAnError) {
     Database db(ValidOptions());
     EXPECT_TRUE(db.Close().ok());
 }
 
-TEST(DatabaseTest, DestructorClosesAutomatically) {
+TEST_F(DatabaseTest, DestructorClosesAutomatically) {
     Options opts = ValidOptions();
     {
         Database db(opts);
