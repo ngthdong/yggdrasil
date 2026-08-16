@@ -54,16 +54,6 @@ target_link_libraries(yggdrasil
 add_executable(page_dump tools/page_dump.cc )
 target_link_libraries(page_dump PRIVATE yggdrasil yggdrasil_project_options)
 
-add_executable(create_db
-    tools/create_db.cc
-)
-
-target_link_libraries(create_db
-    PRIVATE
-        yggdrasil
-        yggdrasil_project_options
-)
-
 # command-line interface
 add_executable(yggdrasil-cli
     tools/yggdrasil-cli.cc
