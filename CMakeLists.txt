@@ -64,6 +64,17 @@ target_link_libraries(create_db
         yggdrasil_project_options
 )
 
+# command-line interface
+add_executable(yggdrasil-cli
+    tools/yggdrasil-cli.cc
+)
+
+target_link_libraries(yggdrasil-cli
+    PRIVATE
+        yggdrasil
+        yggdrasil_project_options
+)
+
 # Tests
 if(ENGINE_BUILD_TESTS)
     enable_testing()
