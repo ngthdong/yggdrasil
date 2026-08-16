@@ -45,6 +45,13 @@ StatusOr<frame_id_t> BufferPoolManager::GetFreeFrame() {
 
     Frame& frame = frames_[static_cast<size_t>(victim)];
     if (frame.is_dirty) {
+        if (wal_manager_ != nullptr && frame.page_lsn > wal_manager_->durable_lsn()) {
+            Status wal_flush_s = wal_manager_->Flush(frame.page_lsn);
+            if (!wal_flush_s.ok()) {
+                return wal_flush_s;
+            }
+        }
+
         Status s = disk_manager_->WritePage(frame.page_id, frame.data);
         if (!s.ok()) {
             replacer_->Unpin(victim);
@@ -86,6 +93,7 @@ StatusOr<char*> BufferPoolManager::FetchPage(page_id_t page_id) {
     frame.page_id = page_id;
     frame.pin_count = 1;
     frame.is_dirty = false;
+    frame.page_lsn = kInvalidLsn;
     page_table_[page_id] = frame_id;
     replacer_->Pin(frame_id); // newly loaded and pinned -> not evictable
     return frame.data;
@@ -101,7 +109,8 @@ StatusOr<char*> BufferPoolManager::ClaimFrameForNewPage(page_id_t page_id) {
         }
         std::memset(frame.data, 0, page_size_);
         frame.pin_count += 1;
-        frame.is_dirty = false; // fresh "new page" content; nothing to flush yet
+        frame.is_dirty = false;       // fresh "new page" content; nothing to flush yet
+        frame.page_lsn = kInvalidLsn; // no WAL record protects this content yet
         return frame.data;
     }
 
@@ -116,6 +125,7 @@ StatusOr<char*> BufferPoolManager::ClaimFrameForNewPage(page_id_t page_id) {
     frame.page_id = page_id;
     frame.pin_count = 1;
     frame.is_dirty = false;
+    frame.page_lsn = kInvalidLsn;
     page_table_[page_id] = frame_id;
     replacer_->Pin(frame_id);
     return frame.data;
@@ -174,11 +184,31 @@ Status BufferPoolManager::FlushPage(page_id_t page_id) {
         return Status::OK();
     }
 
+    if (wal_manager_ != nullptr && frame.page_lsn > wal_manager_->durable_lsn()) {
+        Status flush_s = wal_manager_->Flush(frame.page_lsn);
+        if (!flush_s.ok()) {
+            return flush_s;
+        }
+    }
+
     Status s = disk_manager_->WritePage(page_id, frame.data);
     if (!s.ok()) {
         return s;
     }
     frame.is_dirty = false;
+    return Status::OK();
+}
+
+Status BufferPoolManager::SetPageLSN(page_id_t page_id, lsn_t lsn) {
+    auto it = page_table_.find(page_id);
+    if (it == page_table_.end()) {
+        return Status::InvalidArgument("BufferPoolManager::SetPageLSN: page_id " +
+                                       std::to_string(page_id) + " is not resident");
+    }
+    Frame& frame = frames_[static_cast<size_t>(it->second)];
+    if (lsn > frame.page_lsn) {
+        frame.page_lsn = lsn;
+    }
     return Status::OK();
 }
 
@@ -203,6 +233,14 @@ size_t BufferPoolManager::GetPinCount(page_id_t page_id) const {
 
 bool BufferPoolManager::IsResident(page_id_t page_id) const {
     return page_table_.find(page_id) != page_table_.end();
+}
+
+lsn_t BufferPoolManager::GetPageLSN(page_id_t page_id) const {
+    auto it = page_table_.find(page_id);
+    if (it == page_table_.end()) {
+        return kInvalidLsn;
+    }
+    return frames_[static_cast<size_t>(it->second)].page_lsn;
 }
 
 std::string BufferPoolManager::DebugString() const {

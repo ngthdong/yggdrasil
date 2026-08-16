@@ -39,8 +39,8 @@ class BPlusTree {
     }
 
     StatusOr<std::string> Get(const Slice& key);
-    Status Insert(const Slice& key, const Slice& value);
-    Status Remove(const Slice& key);
+    Status Insert(const Slice& key, const Slice& value, lsn_t lsn = kInvalidLsn);
+    Status Remove(const Slice& key, lsn_t lsn = kInvalidLsn);
 
     StatusOr<Iterator> Begin();
     StatusOr<Iterator> Begin(const Slice& start_key);
@@ -65,33 +65,37 @@ class BPlusTree {
 
     StatusOr<page_id_t> DescendToLeaf(const Slice* key);
 
-    StatusOr<InsertResult> InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value);
+    StatusOr<InsertResult>
+    InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value, lsn_t lsn);
 
-    StatusOr<InsertResult> SplitLeafAndInsert(PageGuard& leaf_guard,
-                                              page_id_t page_id,
-                                              const Slice& key,
-                                              const Slice& value);
+    StatusOr<InsertResult> SplitLeafAndInsert(
+        PageGuard& leaf_guard, page_id_t page_id, const Slice& key, const Slice& value, lsn_t lsn);
 
     StatusOr<InsertResult> SplitInternalAndInsert(PageGuard& internal_guard,
                                                   page_id_t page_id,
                                                   uint16_t insert_idx,
                                                   const Slice& new_key,
-                                                  page_id_t new_child_id);
+                                                  page_id_t new_child_id,
+                                                  lsn_t lsn);
 
-    Status RemoveRecursive(page_id_t page_id, const Slice& key);
+    Status RemoveRecursive(page_id_t page_id, const Slice& key, lsn_t lsn);
 
-    Status MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx);
+    Status MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx, lsn_t lsn);
 
     StatusOr<RebalanceResult> RebalanceLeafPair(PageGuard& left_guard,
                                                 page_id_t left_id,
                                                 PageGuard& right_guard,
-                                                page_id_t right_id);
+                                                page_id_t right_id,
+                                                lsn_t lsn);
 
     StatusOr<RebalanceResult> RebalanceInternalPair(PageGuard& left_guard,
                                                     page_id_t left_id,
                                                     PageGuard& right_guard,
                                                     page_id_t right_id,
-                                                    const Slice& parent_separator);
+                                                    const Slice& parent_separator,
+                                                    lsn_t lsn);
+
+    void MarkDirtyLogged(PageGuard& guard, lsn_t lsn);
 
     Status VerifyRecursive(page_id_t page_id,
                            const Slice* min_key,

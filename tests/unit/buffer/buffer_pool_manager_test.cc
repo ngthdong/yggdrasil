@@ -405,5 +405,94 @@ TEST_F(BufferPoolManagerTest, LruPolicySelectableAndEvictsTrueLeastRecentlyUsed)
     EXPECT_TRUE(bpm.IsResident(id2));
 }
 
+TEST_F(BufferPoolManagerTest, FlushPageWithoutWalManagerWiredWorksExactlyAsBefore) {
+    BufferPoolManager bpm(disk_manager_.get(), 4);
+    page_id_t id;
+    char* data = bpm.NewPage(&id).value();
+    std::memcpy(data, "no wal", 6); // NOLINT(bugprone-not-null-terminated-result)
+    ASSERT_TRUE(bpm.UnpinPage(id, true).ok());
+    ASSERT_TRUE(bpm.FlushPage(id).ok());
+}
+
+TEST_F(BufferPoolManagerTest, FlushPageForcesWalFlushBeforeWritingDirtyPage) {
+    std::string wal_path = "test_bpm_wal_" + std::to_string(::getpid()) + ".wal";
+    std::remove(wal_path.c_str());
+    auto wal = WalManager::Open(wal_path).value();
+
+    BufferPoolManager bpm(disk_manager_.get(), 4);
+    bpm.SetWalManager(wal.get());
+
+    page_id_t id;
+    char* data = bpm.NewPage(&id).value();
+    std::memcpy(data, "no wal", 6); // NOLINT(bugprone-not-null-terminated-result)
+
+    lsn_t lsn = wal->AppendLogRecord(LogRecordType::kInsert, id, Slice("k"), Slice("v")).value();
+    ASSERT_TRUE(bpm.SetPageLSN(id, lsn).ok());
+    ASSERT_TRUE(bpm.UnpinPage(id, true).ok());
+
+    EXPECT_LT(wal->durable_lsn(), lsn);
+    ASSERT_TRUE(bpm.FlushPage(id).ok());
+    EXPECT_GE(wal->durable_lsn(), lsn) << "FlushPage must have forced the WAL to catch up";
+
+    std::vector<char> buf(disk_manager_->page_size());
+    ASSERT_TRUE(disk_manager_->ReadPage(id, buf.data()).ok());
+    EXPECT_EQ(std::memcmp(buf.data(), "protected by wal", 16), 0);
+
+    std::remove(wal_path.c_str());
+}
+
+TEST_F(BufferPoolManagerTest, EvictionAlsoForcesWalFlushNotJustExplicitFlushPage) {
+    std::string wal_path = "test_bpm_wal2_" + std::to_string(::getpid()) + ".wal";
+    std::remove(wal_path.c_str());
+    auto wal = WalManager::Open(wal_path).value();
+
+    BufferPoolManager bpm(disk_manager_.get(), 1); // one frame -> next NewPage evicts this one
+    bpm.SetWalManager(wal.get());
+
+    page_id_t id1;
+    char* data1 = bpm.NewPage(&id1).value();
+    std::memcpy(data1, "evicted under pressure", 23);
+    lsn_t lsn = wal->AppendLogRecord(LogRecordType::kInsert, id1, Slice("k"), Slice("v")).value();
+    ASSERT_TRUE(bpm.SetPageLSN(id1, lsn).ok());
+    ASSERT_TRUE(bpm.UnpinPage(id1, true).ok());
+
+    EXPECT_LT(wal->durable_lsn(), lsn); // not yet flushed
+
+    page_id_t id2;
+    ASSERT_TRUE(bpm.NewPage(&id2).ok()); // forces eviction of id1's frame
+
+    EXPECT_GE(wal->durable_lsn(), lsn) << "eviction must have forced the WAL to catch up too";
+    std::vector<char> buf(disk_manager_->page_size());
+    ASSERT_TRUE(disk_manager_->ReadPage(id1, buf.data()).ok());
+    EXPECT_EQ(std::memcmp(buf.data(), "evicted under pressure", 23), 0);
+
+    std::remove(wal_path.c_str());
+}
+
+TEST_F(BufferPoolManagerTest, SetPageLSNIsStickyHighestNeverRegresses) {
+    BufferPoolManager bpm(disk_manager_.get(), 4);
+    page_id_t id;
+    bpm.NewPage(&id);
+    ASSERT_TRUE(bpm.SetPageLSN(id, 10).ok());
+    EXPECT_EQ(bpm.GetPageLSN(id), 10u);
+    ASSERT_TRUE(bpm.SetPageLSN(id, 5).ok()); // lower LSN must NOT overwrite a higher one
+    EXPECT_EQ(bpm.GetPageLSN(id), 10u) << "page_lsn regressed from 10 to 5";
+    ASSERT_TRUE(bpm.SetPageLSN(id, 15).ok()); // a genuinely higher one still applies
+    EXPECT_EQ(bpm.GetPageLSN(id), 15u);
+}
+
+TEST_F(BufferPoolManagerTest, ReusedFrameDoesNotLeakStalePageLSNOntoNewContent) {
+    BufferPoolManager bpm(disk_manager_.get(), 1); // one frame -> guaranteed reuse
+    page_id_t id1;
+    bpm.NewPage(&id1);
+    ASSERT_TRUE(bpm.SetPageLSN(id1, 999).ok());
+    bpm.UnpinPage(id1, false); // clean, so eviction won't need to flush it
+
+    page_id_t id2;
+    bpm.NewPage(&id2); // evicts id1's frame, reuses it for id2
+    EXPECT_EQ(bpm.GetPageLSN(id2), kInvalidLsn)
+        << "stale page_lsn leaked from the evicted occupant";
+}
+
 } // namespace
 } // namespace engine

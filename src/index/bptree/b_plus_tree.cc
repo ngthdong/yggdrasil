@@ -67,13 +67,13 @@ StatusOr<std::string> BPlusTree::Get(const Slice& key) {
     }
 }
 
-Status BPlusTree::Insert(const Slice& key, const Slice& value) {
+Status BPlusTree::Insert(const Slice& key, const Slice& value, lsn_t lsn) {
     StatusOr<page_id_t> root_or = GetOrCreateRootLeaf();
     if (!root_or.ok()) {
         return root_or.status();
     }
 
-    StatusOr<InsertResult> result_or = InsertRecursive(root_or.value(), key, value);
+    StatusOr<InsertResult> result_or = InsertRecursive(root_or.value(), key, value, lsn);
     if (!result_or.ok()) {
         return result_or.status();
     }
@@ -176,7 +176,7 @@ StatusOr<BPlusTree::Iterator> BPlusTree::Begin(const Slice& start_key) {
 }
 
 StatusOr<BPlusTree::InsertResult>
-BPlusTree::InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value) {
+BPlusTree::InsertRecursive(page_id_t page_id, const Slice& key, const Slice& value, lsn_t lsn) {
     StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, page_id);
     if (!guard_or.ok()) {
         return guard_or.status();
@@ -187,20 +187,20 @@ BPlusTree::InsertRecursive(page_id_t page_id, const Slice& key, const Slice& val
         BPlusTreeLeafPage leaf(guard.mutable_data(), buffer_pool_manager_->page_size());
         Status s = leaf.Insert(key, value, comparator_);
         if (s.ok()) {
-            guard.MarkDirty();
+            MarkDirtyLogged(guard, lsn);
             return InsertResult{};
         }
         if (s.code() != Status::Code::kResourceExhausted) {
             return s;
         }
-        return SplitLeafAndInsert(guard, page_id, key, value);
+        return SplitLeafAndInsert(guard, page_id, key, value, lsn);
     }
 
     BPlusTreeInternalPage internal(guard.mutable_data(), buffer_pool_manager_->page_size());
     uint16_t child_idx = internal.FindChildIndex(key, comparator_);
     page_id_t child_id = internal.ChildAt(child_idx);
 
-    StatusOr<InsertResult> child_result_or = InsertRecursive(child_id, key, value);
+    StatusOr<InsertResult> child_result_or = InsertRecursive(child_id, key, value, lsn);
     if (!child_result_or.ok()) {
         return child_result_or.status();
     }
@@ -212,21 +212,23 @@ BPlusTree::InsertRecursive(page_id_t page_id, const Slice& key, const Slice& val
     Status s = internal.InsertEntry(
         child_idx, Slice(child_result.split_key), child_result.new_right_child_id);
     if (s.ok()) {
-        guard.MarkDirty();
+        MarkDirtyLogged(guard, lsn);
         return InsertResult{};
     }
     if (s.code() != Status::Code::kResourceExhausted) {
         return s;
     }
 
-    return SplitInternalAndInsert(
-        guard, page_id, child_idx, Slice(child_result.split_key), child_result.new_right_child_id);
+    return SplitInternalAndInsert(guard,
+                                  page_id,
+                                  child_idx,
+                                  Slice(child_result.split_key),
+                                  child_result.new_right_child_id,
+                                  lsn);
 }
 
-StatusOr<BPlusTree::InsertResult> BPlusTree::SplitLeafAndInsert(PageGuard& leaf_guard,
-                                                                page_id_t page_id,
-                                                                const Slice& key,
-                                                                const Slice& value) {
+StatusOr<BPlusTree::InsertResult> BPlusTree::SplitLeafAndInsert(
+    PageGuard& leaf_guard, page_id_t page_id, const Slice& key, const Slice& value, lsn_t lsn) {
     BPlusTreeLeafPage leaf(leaf_guard.mutable_data(), buffer_pool_manager_->page_size());
 
     page_id_t old_next = leaf.next_leaf_page_id();
@@ -280,8 +282,8 @@ StatusOr<BPlusTree::InsertResult> BPlusTree::SplitLeafAndInsert(PageGuard& leaf_
     new_leaf.SetNextLeafPageId(old_next);
     left_leaf.SetNextLeafPageId(new_leaf_id);
 
-    leaf_guard.MarkDirty();
-    new_guard.MarkDirty();
+    MarkDirtyLogged(leaf_guard, lsn);
+    MarkDirtyLogged(new_guard, lsn);
 
     std::string separator = all[mid].first; // first key of the right half
     return InsertResult{true, separator, new_leaf_id};
@@ -291,7 +293,8 @@ StatusOr<BPlusTree::InsertResult> BPlusTree::SplitInternalAndInsert(PageGuard& i
                                                                     page_id_t page_id,
                                                                     uint16_t insert_idx,
                                                                     const Slice& new_key,
-                                                                    page_id_t new_child_id) {
+                                                                    page_id_t new_child_id,
+                                                                    lsn_t lsn) {
     BPlusTreeInternalPage internal(internal_guard.mutable_data(),
                                    buffer_pool_manager_->page_size());
     uint16_t old_num_keys = internal.num_keys();
@@ -345,19 +348,19 @@ StatusOr<BPlusTree::InsertResult> BPlusTree::SplitInternalAndInsert(PageGuard& i
         }
     }
 
-    internal_guard.MarkDirty();
-    new_guard.MarkDirty();
+    MarkDirtyLogged(internal_guard, lsn);
+    MarkDirtyLogged(new_guard, lsn);
 
     return InsertResult{true, promoted_key, new_internal_id};
 }
 
-Status BPlusTree::Remove(const Slice& key) {
+Status BPlusTree::Remove(const Slice& key, lsn_t lsn) {
     if (IsEmpty()) {
         return Status::NotFound("BPlusTree::Remove: tree is empty");
     }
     page_id_t root_id = disk_manager_->GetRootPageId();
 
-    Status s = RemoveRecursive(root_id, key);
+    Status s = RemoveRecursive(root_id, key, lsn);
     if (!s.ok()) {
         return s;
     }
@@ -394,7 +397,7 @@ Status BPlusTree::Remove(const Slice& key) {
     return Status::OK();
 }
 
-Status BPlusTree::RemoveRecursive(page_id_t page_id, const Slice& key) {
+Status BPlusTree::RemoveRecursive(page_id_t page_id, const Slice& key, lsn_t lsn) {
     StatusOr<PageGuard> guard_or = FetchPageGuarded(buffer_pool_manager_, page_id);
     if (!guard_or.ok()) {
         return guard_or.status();
@@ -405,7 +408,7 @@ Status BPlusTree::RemoveRecursive(page_id_t page_id, const Slice& key) {
         BPlusTreeLeafPage leaf(guard.mutable_data(), buffer_pool_manager_->page_size());
         Status s = leaf.Remove(key, comparator_);
         if (s.ok()) {
-            guard.MarkDirty();
+            MarkDirtyLogged(guard, lsn);
         }
         return s;
     }
@@ -414,15 +417,15 @@ Status BPlusTree::RemoveRecursive(page_id_t page_id, const Slice& key) {
     uint16_t child_idx = internal.FindChildIndex(key, comparator_);
     page_id_t child_id = internal.ChildAt(child_idx);
 
-    Status s = RemoveRecursive(child_id, key);
+    Status s = RemoveRecursive(child_id, key, lsn);
     if (!s.ok()) {
         return s;
     }
 
-    return MaybeRebalanceChild(guard, child_idx);
+    return MaybeRebalanceChild(guard, child_idx, lsn);
 }
 
-Status BPlusTree::MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx) {
+Status BPlusTree::MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_idx, lsn_t lsn) {
     BPlusTreeInternalPage parent(parent_guard.mutable_data(), buffer_pool_manager_->page_size());
     page_id_t child_id = parent.ChildAt(child_idx);
 
@@ -465,9 +468,9 @@ Status BPlusTree::MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_id
 
     StatusOr<RebalanceResult> result_or =
         child_is_leaf
-            ? RebalanceLeafPair(left_guard, left_id, right_guard, right_id)
+            ? RebalanceLeafPair(left_guard, left_id, right_guard, right_id, lsn)
             : RebalanceInternalPair(
-                  left_guard, left_id, right_guard, right_id, parent.KeyAt(separator_idx));
+                  left_guard, left_id, right_guard, right_id, parent.KeyAt(separator_idx), lsn);
     if (!result_or.ok()) {
         return result_or.status();
     }
@@ -483,21 +486,22 @@ Status BPlusTree::MaybeRebalanceChild(PageGuard& parent_guard, uint16_t child_id
         if (!remove_s.ok()) {
             return remove_s;
         }
-        parent_guard.MarkDirty();
+        MarkDirtyLogged(parent_guard, lsn);
         return Status::OK();
     }
     Status update_s = parent.UpdateKeyAt(separator_idx, Slice(result.new_separator));
     if (!update_s.ok()) {
         return update_s;
     }
-    parent_guard.MarkDirty();
+    MarkDirtyLogged(parent_guard, lsn);
     return Status::OK();
 }
 
 StatusOr<BPlusTree::RebalanceResult> BPlusTree::RebalanceLeafPair(PageGuard& left_guard,
                                                                   page_id_t left_id,
                                                                   PageGuard& right_guard,
-                                                                  page_id_t right_id) {
+                                                                  page_id_t right_id,
+                                                                  lsn_t lsn) {
     BPlusTreeLeafPage left(left_guard.mutable_data(), buffer_pool_manager_->page_size());
     BPlusTreeLeafPage right(right_guard.mutable_data(), buffer_pool_manager_->page_size());
 
@@ -520,7 +524,7 @@ StatusOr<BPlusTree::RebalanceResult> BPlusTree::RebalanceLeafPair(PageGuard& lef
     }
     if (merge_ok) {
         left.SetNextLeafPageId(old_right_next);
-        left_guard.MarkDirty();
+        MarkDirtyLogged(left_guard, lsn);
         return RebalanceResult{true, ""};
     }
 
@@ -544,18 +548,18 @@ StatusOr<BPlusTree::RebalanceResult> BPlusTree::RebalanceLeafPair(PageGuard& lef
     }
     right.SetNextLeafPageId(old_right_next);
     left.SetNextLeafPageId(right_id);
-    left_guard.MarkDirty();
-    right_guard.MarkDirty();
+    MarkDirtyLogged(left_guard, lsn);
+    MarkDirtyLogged(right_guard, lsn);
 
     return RebalanceResult{false, all[mid].first};
 }
 
-StatusOr<BPlusTree::RebalanceResult>
-BPlusTree::RebalanceInternalPair(PageGuard& left_guard,
-                                 page_id_t left_id,
-                                 PageGuard& right_guard,
-                                 page_id_t right_id,
-                                 const Slice& parent_separator) {
+StatusOr<BPlusTree::RebalanceResult> BPlusTree::RebalanceInternalPair(PageGuard& left_guard,
+                                                                      page_id_t left_id,
+                                                                      PageGuard& right_guard,
+                                                                      page_id_t right_id,
+                                                                      const Slice& parent_separator,
+                                                                      lsn_t lsn) {
     BPlusTreeInternalPage left(left_guard.mutable_data(), buffer_pool_manager_->page_size());
     BPlusTreeInternalPage right(right_guard.mutable_data(), buffer_pool_manager_->page_size());
 
@@ -585,7 +589,7 @@ BPlusTree::RebalanceInternalPair(PageGuard& left_guard,
         }
     }
     if (merge_ok) {
-        left_guard.MarkDirty();
+        MarkDirtyLogged(left_guard, lsn);
         return RebalanceResult{true, ""};
     }
 
@@ -607,8 +611,8 @@ BPlusTree::RebalanceInternalPair(PageGuard& left_guard,
             return s;
         }
     }
-    left_guard.MarkDirty();
-    right_guard.MarkDirty();
+    MarkDirtyLogged(left_guard, lsn);
+    MarkDirtyLogged(right_guard, lsn);
 
     // keys[mid] is pulled UP to become the new parent separator
     return RebalanceResult{false, keys[mid]};
@@ -782,6 +786,13 @@ StatusOr<std::string> BPlusTree::ToStringRecursive(page_id_t page_id, int depth)
         out << child_str.value();
     }
     return out.str();
+}
+
+void BPlusTree::MarkDirtyLogged(PageGuard& guard, lsn_t lsn) {
+    guard.MarkDirty();
+    if (lsn != kInvalidLsn) {
+        buffer_pool_manager_->SetPageLSN(guard.page_id(), lsn);
+    }
 }
 
 } // namespace engine

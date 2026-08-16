@@ -8,6 +8,7 @@
 #include "engine/disk_manager.h"
 #include "engine/replacer.h"
 #include "engine/status.h"
+#include "engine/wal_manager.h"
 
 namespace engine {
 
@@ -50,8 +51,14 @@ class BufferPoolManager {
     Status FlushPage(page_id_t page_id);
     Status FlushAllPages();
 
+    void SetWalManager(WalManager* wal_manager) {
+        wal_manager_ = wal_manager;
+    }
+    Status SetPageLSN(page_id_t page_id, lsn_t lsn);
+
     size_t GetPinCount(page_id_t page_id) const;
     bool IsResident(page_id_t page_id) const;
+    lsn_t GetPageLSN(page_id_t page_id) const;
     size_t FreeFrameCount() const {
         return free_list_.size();
     }
@@ -77,6 +84,7 @@ class BufferPoolManager {
         page_id_t page_id = kInvalidPageId;
         size_t pin_count = 0;
         bool is_dirty = false;
+        lsn_t page_lsn = kInvalidLsn;
         char* data = nullptr;
     };
 
@@ -92,6 +100,7 @@ class BufferPoolManager {
     std::unique_ptr<Replacer> replacer_;
     uint64_t hit_count_ = 0;
     uint64_t miss_count_ = 0;
+    WalManager* wal_manager_ = nullptr; // not owned
 };
 
 } // namespace engine

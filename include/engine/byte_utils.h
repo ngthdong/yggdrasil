@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace engine {
+
 inline void PutU16(char* p, uint16_t v) {
     p[0] = static_cast<char>(v & 0xFF);
     p[1] = static_cast<char>((v >> 8) & 0xFF);
@@ -23,6 +24,12 @@ static void PutI32(char* p, int32_t v) {
     PutU32(p, static_cast<uint32_t>(v));
 }
 
+inline void PutU64(char* p, uint64_t v) {
+    for (int i = 0; i < 8; ++i) {
+        p[i] = static_cast<char>((v >> (8 * i)) & 0xFF);
+    }
+}
+
 static uint32_t GetU32(const char* p) {
     return (static_cast<uint32_t>(static_cast<uint8_t>(p[0]))) |
            (static_cast<uint32_t>(static_cast<uint8_t>(p[1])) << 8) |
@@ -32,6 +39,14 @@ static uint32_t GetU32(const char* p) {
 
 static int32_t GetI32(const char* p) {
     return static_cast<int32_t>(GetU32(p));
+}
+
+inline uint64_t GetU64(const char* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) {
+        v |= static_cast<uint64_t>(static_cast<uint8_t>(p[i])) << (8 * i);
+    }
+    return v;
 }
 
 } // namespace engine
