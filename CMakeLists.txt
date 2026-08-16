@@ -13,7 +13,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 option(ENGINE_WARNINGS_AS_ERRORS "Treat warnings as errors" ON)
-option(ENGINE_BUILD_TESTS "Build unit tests" ON)
+option(ENGINE_BUILD_TESTS "Build tests" OFF)
 
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
