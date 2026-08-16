@@ -6,6 +6,29 @@
 
 namespace engine {
 
+// Clock replacement policy.
+//
+// Frames are treated as a circular list. Victim() scans from clock_hand_:
+//   - Skip non-evictable frames.
+//   - If reference bit is set, clear it and give the frame a second chance.
+//   - If reference bit is clear, evict the frame.
+//
+// Example:
+//   Frames:        A  B  C  D  E
+//   Evictable:     Y  Y  Y  N  Y
+//   Reference:     1  1  0  1  1
+//   clock_hand_:   ^
+//
+//   1. A has reference=1 -> clear it and give A a second chance.
+//   2. B has reference=1 -> clear it and give B a second chance.
+//   3. C has reference=0 -> evict C.
+//
+//   After eviction:
+//   Frames:        A  B  _  D  E
+//   clock_hand_ points to D, the frame after the victim.
+//
+// If the scan reaches the end, it wraps around to the beginning,
+// forming a circular scan.
 class ClockReplacer : public Replacer {
   public:
     explicit ClockReplacer(size_t num_frames);
