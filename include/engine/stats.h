@@ -12,6 +12,8 @@ struct DBStats {
     uint64_t buffer_pool_hits = 0;
     uint64_t buffer_pool_misses = 0;
     int tree_height = 0;
+    lsn_t durable_lsn = 0;
+    lsn_t last_checkpoint_lsn = 0;
 
     double BufferPoolHitRate() const {
         uint64_t total = buffer_pool_hits + buffer_pool_misses;

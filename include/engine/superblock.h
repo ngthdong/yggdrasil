@@ -17,6 +17,7 @@ struct Superblock {
     uint32_t page_count = 1;
     int32_t free_list_head_page_id = kInvalidPageId;
     int32_t root_page_id = kInvalidPageId;
+    uint64_t last_checkpoint_lsn = kInvalidLsn;
 
     void SerializeTo(char* buf, uint32_t buf_size) const {
         std::memset(buf, 0, buf_size);
@@ -33,6 +34,8 @@ struct Superblock {
         off += 4;
         PutI32(buf + off, root_page_id);
         off += 4;
+        PutU64(buf + off, last_checkpoint_lsn);
+        off += 8;
     }
 
     static StatusOr<Superblock> DeserializeFrom(const char* buf, uint32_t buf_size) {
@@ -54,6 +57,8 @@ struct Superblock {
         off += 4;
         sb.root_page_id = GetI32(buf + off);
         off += 4;
+        sb.last_checkpoint_lsn = GetU64(buf + off);
+        off += 8;
         if (sb.format_version != kFormatVersion) {
             return Status::Corruption("unsupported format_version " +
                                       std::to_string(sb.format_version));

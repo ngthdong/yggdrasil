@@ -66,6 +66,14 @@ class DiskManager {
         return WriteSuperblock();
     }
 
+    lsn_t GetLastCheckpointLsn() const {
+        return superblock_.last_checkpoint_lsn;
+    }
+    Status SetLastCheckpointLsn(lsn_t lsn) {
+        superblock_.last_checkpoint_lsn = lsn;
+        return WriteSuperblock();
+    }
+
     Status Shutdown();
 
   private:

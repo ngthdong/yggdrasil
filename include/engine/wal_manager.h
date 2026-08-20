@@ -45,6 +45,11 @@ class WalManager {
     // Thread-safe snapshot of the current durable LSN
     lsn_t durable_lsn() const;
 
+    // Truncates durable WAL data and resets the in-memory buffer.
+    // Requires all pending writes to be flushed. LSNs are preserved;
+    // only on-disk offsets are reset. Assumes single-writer checkpoints.
+    Status RecycleAll();
+
     Status Shutdown();
 
   private:

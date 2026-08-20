@@ -111,6 +111,22 @@ Status WalManager::PwriteAll(const char* data, size_t len, off_t offset) const {
     return Status::OK();
 }
 
+Status WalManager::RecycleAll() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (highest_appended_offset_ != durable_offset_) {
+        return Status::InvalidArgument(
+            "WalManager::RecycleAll pending (non-durable) data exists; flush before recycling");
+    }
+    if (::ftruncate(fd_, 0) != 0) {
+        return ErrnoStatus("ftruncate", errno);
+    }
+    buffer_.clear();
+    highest_appended_offset_ = 0;
+    durable_offset_ = 0;
+
+    return Status::OK();
+}
+
 Status WalManager::Shutdown() {
     if (shutdown_) {
         return Status::OK();

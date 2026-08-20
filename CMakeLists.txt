@@ -39,6 +39,7 @@ add_library(yggdrasil
     src/index/bptree/bptree_iterator.cc
     src/log/log_record.cc
     src/log/wal_manager.cc
+    src/recovery/checkpoint_manager.cc
 )
 
 target_include_directories(yggdrasil
@@ -98,6 +99,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/index/bptree/bptree_delete_test.cc
         tests/unit/index/bptree/bptree_iterator_test.cc
         tests/unit/log/wal_manager_test.cc
+        tests/unit/recovery/checkpoint_manager_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
