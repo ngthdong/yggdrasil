@@ -36,3 +36,6 @@ coverage.xml
 
 # Generated database files
 *.db
+
+# Generated wal file
+*.wal
