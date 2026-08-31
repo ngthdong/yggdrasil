@@ -424,7 +424,7 @@ TEST_F(BufferPoolManagerTest, FlushPageForcesWalFlushBeforeWritingDirtyPage) {
 
     page_id_t id;
     char* data = bpm.NewPage(&id).value();
-    std::memcpy(data, "protected by wal", 16); 
+    std::strcpy(data, "protected by wal");
 
     lsn_t lsn = wal->AppendLogRecord(LogRecordType::kInsert, id, Slice("k"), Slice("v")).value();
     ASSERT_TRUE(bpm.SetPageLSN(id, lsn).ok());

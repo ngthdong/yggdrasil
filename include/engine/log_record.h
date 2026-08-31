@@ -21,21 +21,23 @@ enum class LogRecordType : uint8_t {
 
 // Wire format (little-endian, hand-packed via byte_utils):
 //   [0:8)              lsn           (u64)
-//   [8:9)              type          (u8)
-//   [9:13)             page_id       (i32)
-//   [13:15)            key_length    (u16)
-//   [15:15+kl)         key bytes
-//   [15+kl:17+kl)      value_length  (u16) - 0 for kDelete and the stub types
-//   [17+kl:17+kl+vl)   value bytes
-//   [17+kl+vl:21+kl+vl) crc32 over everything from byte 0 up to here
+//   [8:16)             txn_id        (u64)
+//   [16:17)            type          (u8)
+//   [17:21)            page_id       (i32)
+//   [21:23)            key_length    (u16)
+//   [23:23+kl)         key bytes
+//   [23+kl:25+kl)      value_length  (u16) - 0 for kDelete and the stub types
+//   [25+kl:25+kl+vl)   value bytes
+//   [.. +4) crc32 over everything from byte 0 up to here
 struct LogRecord {
     lsn_t lsn = kInvalidLsn;
+    txn_id_t txn_id = kInvalidTxnId;
     LogRecordType type = LogRecordType::kInvalid;
     page_id_t page_id = kInvalidPageId;
     std::string key;
     std::string value;
 
-    static constexpr size_t kFixedHeaderSize = 8 + 1 + 4 + 2; // up to and including key_length
+    static constexpr size_t kFixedHeaderSize = 8 + 8 + 1 + 4 + 2; // up to and including key_length
     static constexpr size_t kChecksumSize = 4;
 
     // Appends this record's serialized bytes onto the end of *buf.

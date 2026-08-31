@@ -7,11 +7,13 @@ namespace engine {
 using page_id_t = int32_t;
 using frame_id_t = int32_t;
 using lsn_t = uint64_t;
+using txn_id_t = uint64_t;
 
 constexpr page_id_t kInvalidPageId = -1;
 constexpr page_id_t kSuperblockPageId = 0;
 constexpr frame_id_t kInvalidFrameId = -1;
 constexpr lsn_t kInvalidLsn = 0;
+constexpr txn_id_t kInvalidTxnId = 0;
 
 enum class PageType : uint8_t {
     kInvalid = 0,

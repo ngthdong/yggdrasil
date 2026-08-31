@@ -6,12 +6,15 @@
 #include "engine/b_plus_tree.h"
 #include "engine/bptree_iterator.h"
 #include "engine/buffer_pool_manager.h"
+#include "engine/checkpoint_manager.h"
 #include "engine/disk_manager.h"
 #include "engine/free_page_manager.h"
 #include "engine/options.h"
+#include "engine/recovery_manager.h"
 #include "engine/slice.h"
 #include "engine/stats.h"
 #include "engine/status.h"
+#include "engine/wal_manager.h"
 
 namespace engine {
 
@@ -59,6 +62,9 @@ class Database {
     const Options& options() const {
         return options_;
     }
+    bool last_open_ran_recovery() const {
+        return last_open_ran_recovery_;
+    }
 
     Status Put(const Slice& key, const Slice& value);
 
@@ -71,16 +77,21 @@ class Database {
     StatusOr<DBStats> GetStats();
     Status Verify();
 
+    Status Checkpoint();
+
   private:
     Status EnsureOpen() const;
 
     Options options_;
     bool is_open_ = false;
+    bool last_open_ran_recovery_ = false;
 
     std::unique_ptr<DiskManager> disk_manager_;
     std::unique_ptr<BufferPoolManager> buffer_pool_manager_;
     std::unique_ptr<FreePageManager> free_page_manager_;
     std::unique_ptr<BPlusTree> tree_;
+    std::unique_ptr<WalManager> wal_manager_;
+    std::unique_ptr<CheckpointManager> checkpoint_manager_;
 };
 
 } // namespace engine

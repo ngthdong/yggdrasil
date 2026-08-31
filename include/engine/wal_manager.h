@@ -36,8 +36,11 @@ class WalManager {
 
     // Assigns the next LSN, serializes the record, and appends it to the
     // in-memory pending buffer.
-    StatusOr<lsn_t>
-    AppendLogRecord(LogRecordType type, page_id_t page_id, const Slice& key, const Slice& value);
+    StatusOr<lsn_t> AppendLogRecord(LogRecordType type,
+                                    page_id_t page_id,
+                                    const Slice& key,
+                                    const Slice& value,
+                                    txn_id_t txn_id = kInvalidTxnId);
 
     // Blocks until every record up to and including `lsn` is durable
     Status Flush(lsn_t lsn);

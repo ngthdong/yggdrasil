@@ -1,4 +1,5 @@
 #include "engine/database.h"
+#include <cstdio>
 
 namespace engine {
 
@@ -40,6 +41,34 @@ Status Database::Open() {
     tree_ = std::make_unique<BPlusTree>(
         disk_manager_.get(), buffer_pool_manager_.get(), free_page_manager_.get());
 
+    std::string wal_path = options_.path + ".wal";
+
+    last_open_ran_recovery_ = false;
+    {
+        FILE* probe = std::fopen(wal_path.c_str(), "rb");
+        if (probe != nullptr) {
+            std::fseek(probe, 0, SEEK_END);
+            long size = std::ftell(probe);
+            std::fclose(probe);
+            last_open_ran_recovery_ = (size > 0);
+        }
+    }
+    RecoveryManager recovery(buffer_pool_manager_.get(), tree_.get(), wal_path);
+    Status recover_s = recovery.Recover();
+    if (!recover_s.ok()) {
+        return recover_s;
+    }
+
+    StatusOr<std::unique_ptr<WalManager>> wal_or = WalManager::Open(wal_path);
+    if (!wal_or.ok()) {
+        return wal_or.status();
+    }
+    wal_manager_ = std::move(wal_or.value());
+    buffer_pool_manager_->SetWalManager(wal_manager_.get());
+
+    checkpoint_manager_ = std::make_unique<CheckpointManager>(
+        disk_manager_.get(), buffer_pool_manager_.get(), wal_manager_.get());
+
     is_open_ = true;
     return Status::OK();
 }
@@ -70,19 +99,36 @@ Status Database::Put(const Slice& key, const Slice& value) {
         return open_check;
     }
 
-    Status insert_s = tree_->Insert(key, value);
-    if (insert_s.ok()) {
-        return Status::OK();
+    StatusOr<lsn_t> lsn_or =
+        wal_manager_->AppendLogRecord(LogRecordType::kInsert, kInvalidPageId, key, value);
+    if (!lsn_or.ok()) {
+        return lsn_or.status();
     }
-    if (insert_s.code() != Status::Code::kInvalidArgument) {
-        return insert_s;
+    lsn_t lsn = lsn_or.value();
+
+    Status insert_s = tree_->Insert(key, value, lsn);
+    if (!insert_s.ok()) {
+        if (insert_s.code() != Status::Code::kInvalidArgument) {
+            return insert_s;
+        }
+
+        Status remove_s = tree_->Remove(key, lsn);
+        if (!remove_s.ok()) {
+            return remove_s;
+        }
+        insert_s = tree_->Insert(key, value, lsn);
+        if (!insert_s.ok()) {
+            return insert_s;
+        }
     }
 
-    Status remove_s = tree_->Remove(key);
-    if (!remove_s.ok()) {
-        return remove_s;
+    if (options_.sync_on_commit) {
+        Status flush_s = wal_manager_->Flush(lsn);
+        if (!flush_s.ok()) {
+            return flush_s;
+        }
     }
-    return tree_->Insert(key, value);
+    return Status::OK();
 }
 
 StatusOr<std::string> Database::Get(const Slice& key) {
@@ -98,7 +144,30 @@ Status Database::Remove(const Slice& key) {
     if (!open_check.ok()) {
         return open_check;
     }
-    return tree_->Remove(key);
+
+    StatusOr<std::string> old_value_or = tree_->Get(key);
+    if (!old_value_or.ok()) {
+        return old_value_or.status();
+    }
+
+    StatusOr<lsn_t> lsn_or = wal_manager_->AppendLogRecord(
+        LogRecordType::kDelete, kInvalidPageId, key, Slice(old_value_or.value()));
+    if (!lsn_or.ok()) {
+        return lsn_or.status();
+    }
+    lsn_t lsn = lsn_or.value();
+
+    Status s = tree_->Remove(key, lsn);
+    if (!s.ok()) {
+        return s;
+    }
+    if (options_.sync_on_commit) {
+        Status flush_s = wal_manager_->Flush(lsn);
+        if (!flush_s.ok()) {
+            return flush_s;
+        }
+    }
+    return Status::OK();
 }
 
 StatusOr<Database::Iterator> Database::NewIterator() {

@@ -14,11 +14,12 @@ void LogRecord::AppendTo(std::string* buf) const {
     char* p = buf->data() + start;
 
     PutU64(p + 0, lsn);
-    p[8] = static_cast<char>(static_cast<uint8_t>(type));
-    PutI32(p + 9, page_id);
-    PutU16(p + 13, static_cast<uint16_t>(key.size()));
-    std::memcpy(p + 15, key.data(), key.size());
-    size_t off = 15 + key.size();
+    PutU64(p + 8, txn_id);
+    p[16] = static_cast<char>(static_cast<uint8_t>(type));
+    PutI32(p + 17, page_id);
+    PutU16(p + 21, static_cast<uint16_t>(key.size()));
+    std::memcpy(p + 23, key.data(), key.size());
+    size_t off = 23 + key.size();
     PutU16(p + off, static_cast<uint16_t>(value.size()));
     off += 2;
     std::memcpy(p + off, value.data(), value.size());
@@ -33,17 +34,19 @@ LogRecord::ParseFrom(const char* buf, size_t buf_len, size_t offset, size_t* out
     if (offset + kFixedHeaderSize > buf_len) {
         return Status::Corruption("LogRecord::ParseFrom: buffer too short for a record header");
     }
+
     const char* p = buf + offset;
     LogRecord record;
     record.lsn = GetU64(p + 0);
-    record.type = static_cast<LogRecordType>(static_cast<uint8_t>(p[8]));
-    record.page_id = GetI32(p + 9);
-    uint16_t key_len = GetU16(p + 13);
-
-    size_t after_key = offset + 15 + key_len;
+    record.txn_id = GetU64(p + 8);
+    record.type = static_cast<LogRecordType>(static_cast<uint8_t>(p[16]));
+    record.page_id = GetI32(p + 17);
+    uint16_t key_len = GetU16(p + 21);
+    size_t after_key = offset + 23 + key_len;
     if (after_key + 2 > buf_len) {
         return Status::Corruption("LogRecord::ParseFrom: buffer too short for value_length field");
     }
+
     uint16_t value_len = GetU16(buf + after_key);
     size_t after_value = after_key + 2 + value_len;
     if (after_value + kChecksumSize > buf_len) {
@@ -58,7 +61,7 @@ LogRecord::ParseFrom(const char* buf, size_t buf_len, size_t offset, size_t* out
             "LogRecord::ParseFrom: checksum mismatch -- likely a torn/partial WAL write");
     }
 
-    record.key.assign(p + 15, key_len);
+    record.key.assign(p + 23, key_len);
     record.value.assign(buf + after_key + 2, value_len);
     *out_consumed = after_value + kChecksumSize - offset;
     return record;

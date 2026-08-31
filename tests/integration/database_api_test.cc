@@ -15,9 +15,11 @@ class DatabaseApiTest : public ::testing::Test {
     void SetUp() override {
         path_ = "test_database_api_" + std::to_string(::getpid()) + ".db";
         std::remove(path_.c_str());
+        std::remove((path_ + ".wal").c_str());
     }
     void TearDown() override {
         std::remove(path_.c_str());
+        std::remove((path_ + ".wal").c_str());
     }
 
     Options ValidOptions(uint32_t page_size = 4096, size_t buffer_pool_frames = 32) {

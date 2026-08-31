@@ -5,6 +5,7 @@ cmake-build-*/
 
 # CMake generated files
 CMakeUserPresets.json
+compile_commands.json
 Testing/
 CTestTestfile.cmake
 install_manifest.txt

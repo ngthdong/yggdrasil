@@ -17,6 +17,8 @@ struct Options {
 
     bool create_if_missing = true;
 
+    bool sync_on_commit = true;
+
     Status Validate() const {
         if (path.empty()) {
             return Status::InvalidArgument("Options.path must not be empty");

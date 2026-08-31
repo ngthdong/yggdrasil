@@ -11,9 +11,11 @@ class DatabaseTest : public ::testing::Test {
     void SetUp() override {
         path_ = "test_database_" + std::to_string(::getpid()) + ".db";
         std::remove(path_.c_str());
+        std::remove((path_ + ".wal").c_str());
     }
     void TearDown() override {
         std::remove(path_.c_str());
+        std::remove((path_ + ".wal").c_str());
     }
 
     Options ValidOptions() {

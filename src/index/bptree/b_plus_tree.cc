@@ -31,6 +31,11 @@ StatusOr<page_id_t> BPlusTree::GetOrCreateRootLeaf() {
         return unpin_s;
     }
 
+    Status flush_s = buffer_pool_manager_->FlushPage(new_id);
+    if (!flush_s.ok()) {
+        return flush_s;
+    }
+
     Status set_s = disk_manager_->SetRootPageId(new_id);
     if (!set_s.ok()) {
         return set_s;
@@ -100,7 +105,19 @@ Status BPlusTree::Insert(const Slice& key, const Slice& value, lsn_t lsn) {
     if (!s.ok()) {
         return s; // should be unreachable: a fresh page always has room for one entry
     }
-    new_root_guard.MarkDirty();
+    MarkDirtyLogged(new_root_guard, lsn);
+
+    new_root_guard.Reset();
+
+    Status child_flush_s = buffer_pool_manager_->FlushPage(result.new_right_child_id);
+    if (!child_flush_s.ok()) {
+        return child_flush_s;
+    }
+
+    Status root_flush_s = buffer_pool_manager_->FlushPage(new_root_id);
+    if (!root_flush_s.ok()) {
+        return root_flush_s;
+    }
 
     return disk_manager_->SetRootPageId(new_root_id);
 }

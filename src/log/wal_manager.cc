@@ -31,18 +31,16 @@ WalManager::~WalManager() {
     }
 }
 
-StatusOr<lsn_t> WalManager::AppendLogRecord(LogRecordType type,
-                                            page_id_t page_id,
-                                            const Slice& key,
-                                            const Slice& value) {
+StatusOr<lsn_t> WalManager::AppendLogRecord(
+    LogRecordType type, page_id_t page_id, const Slice& key, const Slice& value, txn_id_t txn_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     LogRecord record;
     record.lsn = next_lsn_++;
+    record.txn_id = txn_id;
     record.type = type;
     record.page_id = page_id;
     record.key = key.ToString();
     record.value = value.ToString();
-
     record.AppendTo(&buffer_);
     highest_appended_lsn_ = record.lsn;
     highest_appended_offset_ = buffer_.size();
