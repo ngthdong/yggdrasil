@@ -14,6 +14,7 @@
 #include "engine/slice.h"
 #include "engine/stats.h"
 #include "engine/status.h"
+#include "engine/transaction.h"
 #include "engine/wal_manager.h"
 
 namespace engine {
@@ -79,7 +80,19 @@ class Database {
 
     Status Checkpoint();
 
+    StatusOr<Transaction> BeginTransaction();
+    bool has_active_transaction() const {
+        return active_txn_id_ != kInvalidTxnId;
+    }
+
   private:
+    friend class Transaction;
+
+    Status EnsureNoActiveTransaction() const;
+    void OnTransactionFinalized(txn_id_t txn_id);
+    txn_id_t next_txn_id_ = 1;
+    txn_id_t active_txn_id_ = kInvalidTxnId;
+
     Status EnsureOpen() const;
 
     Options options_;

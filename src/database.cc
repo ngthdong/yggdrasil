@@ -99,6 +99,11 @@ Status Database::Put(const Slice& key, const Slice& value) {
         return open_check;
     }
 
+    Status txn_check = EnsureNoActiveTransaction();
+    if (!txn_check.ok()) {
+        return txn_check;
+    }
+
     StatusOr<lsn_t> lsn_or =
         wal_manager_->AppendLogRecord(LogRecordType::kInsert, kInvalidPageId, key, value);
     if (!lsn_or.ok()) {
@@ -143,6 +148,11 @@ Status Database::Remove(const Slice& key) {
     Status open_check = EnsureOpen();
     if (!open_check.ok()) {
         return open_check;
+    }
+
+    Status txn_check = EnsureNoActiveTransaction();
+    if (!txn_check.ok()) {
+        return txn_check;
     }
 
     StatusOr<std::string> old_value_or = tree_->Get(key);
@@ -222,6 +232,41 @@ Status Database::Verify() {
         return open_check;
     }
     return tree_->Verify();
+}
+
+Status Database::EnsureNoActiveTransaction() const {
+    if (active_txn_id_ != kInvalidTxnId) {
+        return Status::InvalidArgument("Database: a Transaction is active, using it directly, or "
+                                       "Commit()/Rollback() it first");
+    }
+    return Status::OK();
+}
+
+void Database::OnTransactionFinalized(txn_id_t txn_id) {
+    if (active_txn_id_ == txn_id) {
+        active_txn_id_ = kInvalidTxnId;
+    }
+}
+
+StatusOr<Transaction> Database::BeginTransaction() {
+    Status open_check = EnsureOpen();
+    if (!open_check.ok()) {
+        return open_check;
+    }
+    Status txn_check = EnsureNoActiveTransaction();
+    if (!txn_check.ok()) {
+        return txn_check;
+    }
+
+    txn_id_t txn_id = next_txn_id_++;
+    StatusOr<lsn_t> lsn_or = wal_manager_->AppendLogRecord(
+        LogRecordType::kBegin, kInvalidPageId, Slice(""), Slice(""), txn_id);
+    if (!lsn_or.ok()) {
+        return lsn_or.status();
+    }
+
+    active_txn_id_ = txn_id;
+    return Transaction(this, tree_.get(), wal_manager_.get(), txn_id, options_.sync_on_commit);
 }
 
 } // namespace engine

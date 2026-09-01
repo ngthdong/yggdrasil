@@ -42,6 +42,7 @@ add_library(yggdrasil
     src/recovery/checkpoint_manager.cc
     src/recovery/recovery_manager.cc
     src/recovery/undo_utils.cc
+    src/txn/transaction.cc
 )
 
 target_include_directories(yggdrasil
@@ -106,6 +107,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/log/wal_manager_test.cc
         tests/unit/recovery/checkpoint_manager_test.cc
         tests/unit/recovery/recovery_manager_test.cc
+        tests/unit/txn/transaction_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
