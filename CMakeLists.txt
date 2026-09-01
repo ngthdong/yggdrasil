@@ -41,6 +41,7 @@ add_library(yggdrasil
     src/log/wal_manager.cc
     src/recovery/checkpoint_manager.cc
     src/recovery/recovery_manager.cc
+    src/recovery/undo_utils.cc
 )
 
 target_include_directories(yggdrasil
