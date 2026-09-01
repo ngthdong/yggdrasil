@@ -44,12 +44,24 @@ TEST_F(TransactionTest, BeginTransactionSucceedsAndMarksDatabaseActive) {
     EXPECT_TRUE(db_->has_active_transaction());
 }
 
-TEST_F(TransactionTest, OnlyOneActiveTransactionIsAllowedAtATime) {
-    StatusOr<Transaction> first = db_->BeginTransaction();
-    ASSERT_TRUE(first.ok());
+TEST_F(TransactionTest, MultipleTransactionsCanBeActiveConcurrently) {
+    StatusOr<Transaction> first_or = db_->BeginTransaction();
+    ASSERT_TRUE(first_or.ok());
+    Transaction first = std::move(first_or.value());
+    EXPECT_TRUE(first.is_active());
 
-    StatusOr<Transaction> second = db_->BeginTransaction();
-    EXPECT_FALSE(second.ok());
+    StatusOr<Transaction> second_or = db_->BeginTransaction();
+    ASSERT_TRUE(second_or.ok());
+    Transaction second = std::move(second_or.value());
+    EXPECT_TRUE(second.is_active());
+
+    EXPECT_TRUE(db_->has_active_transaction());
+
+    ASSERT_TRUE(first.Commit().ok());
+    EXPECT_TRUE(db_->has_active_transaction()) << "second transaction is still active";
+
+    ASSERT_TRUE(second.Commit().ok());
+    EXPECT_FALSE(db_->has_active_transaction());
 }
 
 TEST_F(TransactionTest, DirectPutIsRejectedWhileTransactionIsActive) {

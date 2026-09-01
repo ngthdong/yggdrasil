@@ -68,6 +68,7 @@ Status Database::Open() {
 
     checkpoint_manager_ = std::make_unique<CheckpointManager>(
         disk_manager_.get(), buffer_pool_manager_.get(), wal_manager_.get());
+    lock_manager_ = std::make_unique<LockManager>();
 
     is_open_ = true;
     return Status::OK();
@@ -98,6 +99,8 @@ Status Database::Put(const Slice& key, const Slice& value) {
     if (!open_check.ok()) {
         return open_check;
     }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
 
     Status txn_check = EnsureNoActiveTransaction();
     if (!txn_check.ok()) {
@@ -141,6 +144,7 @@ StatusOr<std::string> Database::Get(const Slice& key) {
     if (!open_check.ok()) {
         return open_check;
     }
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
     return tree_->Get(key);
 }
 
@@ -149,6 +153,8 @@ Status Database::Remove(const Slice& key) {
     if (!open_check.ok()) {
         return open_check;
     }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
 
     Status txn_check = EnsureNoActiveTransaction();
     if (!txn_check.ok()) {
@@ -185,6 +191,9 @@ StatusOr<Database::Iterator> Database::NewIterator() {
     if (!open_check.ok()) {
         return open_check;
     }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
     StatusOr<BPlusTreeIterator> it_or = tree_->Begin();
     if (!it_or.ok()) {
         return it_or.status();
@@ -197,6 +206,9 @@ StatusOr<Database::Iterator> Database::NewIterator(const Slice& start_key) {
     if (!open_check.ok()) {
         return open_check;
     }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
     StatusOr<BPlusTreeIterator> it_or = tree_->Begin(start_key);
     if (!it_or.ok()) {
         return it_or.status();
@@ -209,6 +221,8 @@ StatusOr<DBStats> Database::GetStats() {
     if (!open_check.ok()) {
         return open_check;
     }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
 
     StatusOr<int> height_or = tree_->Height();
     if (!height_or.ok()) {
@@ -231,20 +245,38 @@ Status Database::Verify() {
     if (!open_check.ok()) {
         return open_check;
     }
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
     return tree_->Verify();
 }
 
+Status Database::Checkpoint() {
+    Status open_check = EnsureOpen();
+    if (!open_check.ok()) {
+        return open_check;
+    }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
+    Status txn_check = EnsureNoActiveTransaction();
+    if (!txn_check.ok()) {
+        return txn_check;
+    }
+
+    return checkpoint_manager_->TakeCheckpoint();
+}
+
 Status Database::EnsureNoActiveTransaction() const {
-    if (active_txn_id_ != kInvalidTxnId) {
+    if (active_txn_count_ > 0) {
         return Status::InvalidArgument("Database: a Transaction is active, using it directly, or "
                                        "Commit()/Rollback() it first");
     }
     return Status::OK();
 }
 
-void Database::OnTransactionFinalized(txn_id_t txn_id) {
-    if (active_txn_id_ == txn_id) {
-        active_txn_id_ = kInvalidTxnId;
+void Database::OnTransactionFinalized(txn_id_t /*txn_id*/) {
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+    if (active_txn_count_ > 0) {
+        active_txn_count_--;
     }
 }
 
@@ -253,20 +285,27 @@ StatusOr<Transaction> Database::BeginTransaction() {
     if (!open_check.ok()) {
         return open_check;
     }
-    Status txn_check = EnsureNoActiveTransaction();
-    if (!txn_check.ok()) {
-        return txn_check;
-    }
 
-    txn_id_t txn_id = next_txn_id_++;
+    txn_id_t txn_id;
+    {
+        std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+        txn_id = next_txn_id_++;
+        active_txn_count_++;
+    }
     StatusOr<lsn_t> lsn_or = wal_manager_->AppendLogRecord(
         LogRecordType::kBegin, kInvalidPageId, Slice(""), Slice(""), txn_id);
     if (!lsn_or.ok()) {
+        std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+        active_txn_count_--;
         return lsn_or.status();
     }
-
-    active_txn_id_ = txn_id;
-    return Transaction(this, tree_.get(), wal_manager_.get(), txn_id, options_.sync_on_commit);
+    return Transaction(this,
+                       tree_.get(),
+                       wal_manager_.get(),
+                       lock_manager_.get(),
+                       &engine_mutex_,
+                       txn_id,
+                       options_.sync_on_commit);
 }
 
 } // namespace engine

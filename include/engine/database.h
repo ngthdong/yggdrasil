@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "engine/b_plus_tree.h"
@@ -9,6 +10,7 @@
 #include "engine/checkpoint_manager.h"
 #include "engine/disk_manager.h"
 #include "engine/free_page_manager.h"
+#include "engine/lock_manager.h"
 #include "engine/options.h"
 #include "engine/recovery_manager.h"
 #include "engine/slice.h"
@@ -82,7 +84,7 @@ class Database {
 
     StatusOr<Transaction> BeginTransaction();
     bool has_active_transaction() const {
-        return active_txn_id_ != kInvalidTxnId;
+        return active_txn_count_ > 0;
     }
 
   private:
@@ -91,7 +93,7 @@ class Database {
     Status EnsureNoActiveTransaction() const;
     void OnTransactionFinalized(txn_id_t txn_id);
     txn_id_t next_txn_id_ = 1;
-    txn_id_t active_txn_id_ = kInvalidTxnId;
+    txn_id_t active_txn_count_ = 0;
 
     Status EnsureOpen() const;
 
@@ -105,6 +107,8 @@ class Database {
     std::unique_ptr<BPlusTree> tree_;
     std::unique_ptr<WalManager> wal_manager_;
     std::unique_ptr<CheckpointManager> checkpoint_manager_;
+    std::unique_ptr<LockManager> lock_manager_;
+    std::mutex engine_mutex_;
 };
 
 } // namespace engine

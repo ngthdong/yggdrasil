@@ -4,9 +4,15 @@
 
 namespace engine {
 
-Transaction::Transaction(
-    Database* db, BPlusTree* tree, WalManager* wal, txn_id_t txn_id, bool sync_on_commit)
-    : db_(db), tree_(tree), wal_(wal), txn_id_(txn_id), sync_on_commit_(sync_on_commit) {}
+Transaction::Transaction(Database* db,
+                         BPlusTree* tree,
+                         WalManager* wal,
+                         LockManager* lock_manager,
+                         std::mutex* engine_mutex,
+                         txn_id_t txn_id,
+                         bool sync_on_commit)
+    : db_(db), tree_(tree), wal_(wal), lock_manager_(lock_manager), engine_mutex_(engine_mutex),
+      txn_id_(txn_id), sync_on_commit_(sync_on_commit) {}
 
 Transaction::Transaction(Transaction&& other) noexcept {
     *this = std::move(other);
@@ -20,6 +26,8 @@ Transaction& Transaction::operator=(Transaction&& other) noexcept {
         db_ = other.db_;
         tree_ = other.tree_;
         wal_ = other.wal_;
+        lock_manager_ = other.lock_manager_;
+        engine_mutex_ = other.engine_mutex_;
         txn_id_ = other.txn_id_;
         sync_on_commit_ = other.sync_on_commit_;
         finalized_ = other.finalized_;
@@ -62,9 +70,51 @@ Status Transaction::LogAndApply(LogRecordType type, const Slice& key, const Slic
     return Status::OK();
 }
 
+Status Transaction::AcquireAndCheckWound(const std::string& key, LockMode mode) {
+    Status lock_s = lock_manager_->AcquireLock(txn_id_, key, mode);
+    if (lock_s.ok()) {
+        return Status::OK();
+    }
+    if (lock_s.code() != Status::Code::kAborted) {
+        return lock_s;
+    }
+
+    SelfRollbackAfterWound();
+    return lock_s;
+}
+
+Status Transaction::SelfRollbackAfterWound() {
+    Status undo_s;
+    {
+        std::lock_guard<std::mutex> engine_lock(*engine_mutex_);
+        undo_s = ApplyLogicalUndo(tree_, records_);
+    }
+    lock_manager_->ReleaseAllLocks(txn_id_);
+    finalized_ = true;
+    db_->OnTransactionFinalized(txn_id_);
+    return undo_s;
+}
+
+StatusOr<std::string> Transaction::Get(const Slice& key) {
+    if (!is_active()) {
+        return Status::InvalidArgument("Transaction::Get: transaction is not active.");
+    }
+    Status lock_s = AcquireAndCheckWound(key.ToString(), LockMode::kShared);
+    if (!lock_s.ok()) {
+        return lock_s;
+    }
+
+    std::lock_guard<std::mutex> engine_lock(*engine_mutex_);
+    return tree_->Get(key);
+}
+
 Status Transaction::Put(const Slice& key, const Slice& value) {
     if (!is_active()) {
         return Status::InvalidArgument("Transaction::Put: transaction is not active.");
+    }
+    Status lock_s = AcquireAndCheckWound(key.ToString(), LockMode::kExclusive);
+    if (!lock_s.ok()) {
+        return lock_s;
     }
     StatusOr<std::string> old_value_or = tree_->Get(Slice(key));
     if (old_value_or.ok()) {
@@ -78,6 +128,10 @@ Status Transaction::Put(const Slice& key, const Slice& value) {
 Status Transaction::Remove(const Slice& key) {
     if (!is_active()) {
         return Status::InvalidArgument("Transaction::Remove: transaction is not active.");
+    }
+    Status lock_s = AcquireAndCheckWound(key.ToString(), LockMode::kExclusive);
+    if (!lock_s.ok()) {
+        return lock_s;
     }
     StatusOr<std::string> old_value_or = tree_->Get(Slice(key));
     if (!old_value_or.ok()) {

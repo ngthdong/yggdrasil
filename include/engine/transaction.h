@@ -1,9 +1,11 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "engine/b_plus_tree.h"
+#include "engine/lock_manager.h"
 #include "engine/log_record.h"
 #include "engine/slice.h"
 #include "engine/status.h"
@@ -28,6 +30,8 @@ class Transaction {
     Transaction(const Transaction&) = delete;
     Transaction& operator=(const Transaction&) = delete;
     ~Transaction();
+
+    StatusOr<std::string> Get(const Slice& key);
 
     // Inserts or updates a key within the transaction.
     // For an existing key, the previous value is preserved in the transaction's
@@ -62,13 +66,22 @@ class Transaction {
 
   private:
     friend class Database;
-    Transaction(
-        Database* db, BPlusTree* tree, WalManager* wal, txn_id_t txn_id, bool sync_on_commit);
+    Transaction(Database* db,
+                BPlusTree* tree,
+                WalManager* wal,
+                LockManager* lock_manager,
+                std::mutex* engine_mutex,
+                txn_id_t txn_id,
+                bool sync_on_commit);
     Status LogAndApply(LogRecordType type, const Slice& key, const Slice& value);
+    Status AcquireAndCheckWound(const std::string& key, LockMode mode);
+    Status SelfRollbackAfterWound();
 
     Database* db_ = nullptr;
     BPlusTree* tree_ = nullptr;
     WalManager* wal_ = nullptr;
+    LockManager* lock_manager_ = nullptr;
+    std::mutex* engine_mutex_ = nullptr;
     txn_id_t txn_id_ = kInvalidTxnId;
     bool sync_on_commit_ = true;
     bool finalized_ = false;
