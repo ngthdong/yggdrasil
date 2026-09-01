@@ -216,6 +216,7 @@ TEST_F(RecoveryManagerTest, MultipleTransactionsAreResolvedIndependently) {
 // against the same file must recover the lost writes purely from the WAL.
 TEST_F(RecoveryManagerTest, DataSurvivesSimulatedCrashViaWalRedo) {
     std::vector<std::pair<std::string, std::string>> kvs;
+    kvs.reserve(30);
     for (int i = 0; i < 30; ++i) {
         kvs.emplace_back("key" + std::to_string(i), "value" + std::to_string(i));
     }

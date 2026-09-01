@@ -33,8 +33,9 @@ class CheckpointManagerTest : public ::testing::Test {
     }
     long WalFileSize() {
         FILE* f = std::fopen(wal_path_.c_str(), "rb");
-        if (!f)
+        if (f == nullptr) {
             return -1;
+        }
         std::fseek(f, 0, SEEK_END);
         long size = std::ftell(f);
         std::fclose(f);
@@ -69,7 +70,7 @@ TEST_F(CheckpointManagerTest, CheckpointFlushesAllDirtyPages) {
     std::vector<char> buf(512);
     ASSERT_TRUE(dm2->ReadPage(root, buf.data()).ok());
     std::string page_str(buf.data(), buf.size());
-    EXPECT_NE(page_str.find("a"), std::string::npos);
+    EXPECT_NE(page_str.find('a'), std::string::npos);
 }
 
 TEST_F(CheckpointManagerTest, CheckpointPersistsLastCheckpointLsnAcrossReopen) {

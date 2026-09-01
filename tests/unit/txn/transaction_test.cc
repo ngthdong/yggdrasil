@@ -240,7 +240,10 @@ TEST_F(TransactionTest, MoveConstructionTransfersActiveState) {
     ASSERT_TRUE(original.Put(Slice("a"), Slice("1")).ok());
 
     Transaction moved(std::move(original));
-    EXPECT_FALSE(original.is_active()); // moved-from
+    // Checking the moved-from object's state is the point of this test;
+    // Transaction's move constructor leaves it well-defined (moved_from_ = true).
+    // NOLINTNEXTLINE(bugprone-use-after-move)
+    EXPECT_FALSE(original.is_active());
     EXPECT_TRUE(moved.is_active());
 
     ASSERT_TRUE(moved.Commit().ok());
