@@ -1,7 +1,7 @@
 #include "engine/recovery_manager.h"
 #include "cstdio"
 
-#include <ranges>
+#include "engine/undo_utils.h"
 
 namespace engine {
 
@@ -103,24 +103,9 @@ Status RecoveryManager::Undo(const std::unordered_map<txn_id_t, TxnInfo>& txns) 
         if (info.committed) {
             continue;
         }
-        for (const auto& rec : info.records | std::views::reverse) {
-            if (rec.type == LogRecordType::kInsert) {
-                StatusOr<std::string> v = tree_->Get(Slice(rec.key));
-                if (v.ok() && v.value() == rec.value) {
-                    Status s = tree_->Remove(Slice(rec.key));
-                    if (!s.ok()) {
-                        return s;
-                    }
-                }
-            } else if (rec.type == LogRecordType::kDelete) {
-                StatusOr<std::string> v = tree_->Get(Slice(rec.key));
-                if (!v.ok()) {
-                    Status s = tree_->Insert(Slice(rec.key), Slice(rec.value));
-                    if (!s.ok()) {
-                        return s;
-                    }
-                }
-            }
+        Status s = ApplyLogicalUndo(tree_, info.records);
+        if (!s.ok()) {
+            return s;
         }
     }
     return Status::OK();
