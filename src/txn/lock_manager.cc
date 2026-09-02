@@ -37,6 +37,7 @@ Status LockManager::AcquireLock(txn_id_t txn_id, const std::string& resource, Lo
     }
 
     while (HasConflict(granted, txn_id, mode)) {
+        bool wounded_someone_new = false;
         if (policy_ == DeadlockPolicy::kWoundWait) {
             for (const auto& req : granted) {
                 if (req.txn_id == txn_id) {
@@ -46,12 +47,14 @@ Status LockManager::AcquireLock(txn_id_t txn_id, const std::string& resource, Lo
                     continue;
                 }
                 if (txn_id < req.txn_id) {
-                    aborted_.insert(req.txn_id);
+                    wounded_someone_new = aborted_.insert(req.txn_id).second || wounded_someone_new;
                 }
             }
         }
         waiting_[txn_id] = WaitState{resource, mode};
-        cv_.notify_all();
+        if (wounded_someone_new) {
+            cv_.notify_all(); // only notify when something material actually changed
+        }
         cv_.wait(lock);
         waiting_.erase(txn_id);
         if (aborted_.contains(txn_id)) {
