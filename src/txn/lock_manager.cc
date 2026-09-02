@@ -37,19 +37,23 @@ Status LockManager::AcquireLock(txn_id_t txn_id, const std::string& resource, Lo
     }
 
     while (HasConflict(granted, txn_id, mode)) {
-        for (const auto& req : granted) {
-            if (req.txn_id == txn_id) {
-                continue;
-            }
-            if (mode == LockMode::kShared && req.mode == LockMode::kShared) {
-                continue;
-            }
-            if (txn_id < req.txn_id) {
-                aborted_.insert(req.txn_id);
+        if (policy_ == DeadlockPolicy::kWoundWait) {
+            for (const auto& req : granted) {
+                if (req.txn_id == txn_id) {
+                    continue;
+                }
+                if (mode == LockMode::kShared && req.mode == LockMode::kShared) {
+                    continue;
+                }
+                if (txn_id < req.txn_id) {
+                    aborted_.insert(req.txn_id);
+                }
             }
         }
+        waiting_[txn_id] = WaitState{resource, mode};
         cv_.notify_all();
         cv_.wait(lock);
+        waiting_.erase(txn_id);
         if (aborted_.contains(txn_id)) {
             return Status::Aborted("LockManager: transaction " + std::to_string(txn_id) +
                                    " was wounded while waiting");
@@ -73,6 +77,72 @@ void LockManager::ReleaseAllLocks(txn_id_t txn_id) {
 bool LockManager::IsAborted(txn_id_t txn_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     return aborted_.contains(txn_id);
+}
+
+bool LockManager::FindCycle(txn_id_t start,
+                            const std::unordered_map<txn_id_t, std::vector<txn_id_t>>& graph,
+                            std::unordered_set<txn_id_t>* visited,
+                            std::vector<txn_id_t>* path,
+                            std::unordered_set<txn_id_t>* in_path,
+                            std::vector<txn_id_t>* cycle_out) const {
+    visited->insert(start);
+    in_path->insert(start);
+    path->push_back(start);
+    auto it = graph.find(start);
+    if (it != graph.end()) {
+        for (txn_id_t next : it->second) {
+            if (in_path->count(next) > 0) {
+                auto cs = std::find(path->begin(), path->end(), next);
+                cycle_out->assign(cs, path->end());
+                return true;
+            }
+            if (visited->count(next) == 0 &&
+                FindCycle(next, graph, visited, path, in_path, cycle_out)) {
+                return true;
+            }
+        }
+    }
+    path->pop_back();
+    in_path->erase(start);
+    return false;
+}
+
+void LockManager::RunDetectionCycle() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (policy_ != DeadlockPolicy::kDetection) {
+        return;
+    }
+    std::unordered_map<txn_id_t, std::vector<txn_id_t>> graph;
+    for (const auto& [waiter_id, wait] : waiting_) {
+        auto lt_it = lock_table_.find(wait.resourse);
+        if (lt_it == lock_table_.end()) {
+            continue;
+        }
+        for (const auto& req : lt_it->second) {
+            if (req.txn_id == waiter_id) {
+                continue;
+            }
+            if (wait.mode == LockMode::kShared && req.mode == LockMode::kShared) {
+                continue;
+            }
+            graph[waiter_id].push_back(req.txn_id);
+        }
+    }
+    std::unordered_set<txn_id_t> visited;
+    for (const auto& [node, edges] : graph) {
+        if (visited.contains(node)) {
+            continue;
+        }
+        std::vector<txn_id_t> path;
+        std::vector<txn_id_t> cycle;
+        std::unordered_set<txn_id_t> in_path;
+        if (FindCycle(node, graph, &visited, &path, &in_path, &cycle)) {
+            txn_id_t victim = *std::max_element(cycle.begin(), cycle.end());
+            aborted_.insert(victim);
+            cv_.notify_all();
+            return;
+        }
+    }
 }
 
 } // namespace engine

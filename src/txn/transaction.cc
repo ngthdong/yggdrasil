@@ -116,6 +116,7 @@ Status Transaction::Put(const Slice& key, const Slice& value) {
     if (!lock_s.ok()) {
         return lock_s;
     }
+    std::lock_guard<std::mutex> engine_lock(*engine_mutex_);
     StatusOr<std::string> old_value_or = tree_->Get(Slice(key));
     if (old_value_or.ok()) {
         Status del_s = LogAndApply(LogRecordType::kDelete, key, Slice(old_value_or.value()));
@@ -133,6 +134,7 @@ Status Transaction::Remove(const Slice& key) {
     if (!lock_s.ok()) {
         return lock_s;
     }
+    std::lock_guard<std::mutex> engine_lock(*engine_mutex_);
     StatusOr<std::string> old_value_or = tree_->Get(Slice(key));
     if (!old_value_or.ok()) {
         return old_value_or.status();
@@ -171,7 +173,11 @@ Status Transaction::Rollback() {
     if (finalized_) {
         return Status::InvalidArgument("Transaction::Roolback: already finalized.");
     }
-    Status undo_s = ApplyLogicalUndo(tree_, records_);
+    Status undo_s;
+    {
+        std::lock_guard<std::mutex> engine_lock(*engine_mutex_);
+        undo_s = ApplyLogicalUndo(tree_, records_);
+    }
     if (!undo_s.ok()) {
         return undo_s;
     }

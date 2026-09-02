@@ -68,7 +68,12 @@ Status Database::Open() {
 
     checkpoint_manager_ = std::make_unique<CheckpointManager>(
         disk_manager_.get(), buffer_pool_manager_.get(), wal_manager_.get());
-    lock_manager_ = std::make_unique<LockManager>();
+    lock_manager_ = std::make_unique<LockManager>(options_.deadlock_policy);
+    if (options_.deadlock_policy == DeadlockPolicy::kDetection) {
+        deadlock_detector_ = std::make_unique<DeadlockDetector>(
+            lock_manager_.get(), options_.deadlock_detection_interval);
+        deadlock_detector_->Start();
+    }
 
     is_open_ = true;
     return Status::OK();
@@ -86,6 +91,9 @@ Status Database::Close() {
     free_page_manager_.reset();
     buffer_pool_manager_.reset();
     disk_manager_.reset();
+    checkpoint_manager_.reset();
+    deadlock_detector_.reset();
+    lock_manager_.reset();
     is_open_ = false;
 
     if (!flush_s.ok()) {

@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "engine/config.h"
 #include "engine/status.h"
@@ -13,6 +14,7 @@
 namespace engine {
 
 enum class LockMode { kShared, kExclusive };
+enum class DeadlockPolicy { kWoundWait, kDetection };
 
 // Coordinates transaction-level locks for concurrent access to shared keys.
 //
@@ -30,23 +32,37 @@ enum class LockMode { kShared, kExclusive };
 // deadlock detection is not required.
 class LockManager {
   public:
+    explicit LockManager(DeadlockPolicy policy = DeadlockPolicy::kWoundWait) : policy_(policy) {}
     Status AcquireLock(txn_id_t txn_id, const std::string& resource, LockMode mode);
     void ReleaseAllLocks(txn_id_t txn_id);
     bool IsAborted(txn_id_t txn_id) const;
+    void RunDetectionCycle();
 
   private:
     struct LockRequest {
         txn_id_t txn_id;
         LockMode mode;
     };
+    struct WaitState {
+        std::string resourse;
+        LockMode mode;
+    };
 
     static bool
     HasConflict(const std::list<LockRequest>& granted, txn_id_t requester, LockMode mode);
+    bool FindCycle(txn_id_t start,
+                   const std::unordered_map<txn_id_t, std::vector<txn_id_t>>& graph,
+                   std::unordered_set<txn_id_t>* visited,
+                   std::vector<txn_id_t>* path,
+                   std::unordered_set<txn_id_t>* in_path,
+                   std::vector<txn_id_t>* cycle_out) const;
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::unordered_map<std::string, std::list<LockRequest>> lock_table_;
     std::unordered_set<txn_id_t> aborted_;
+    std::unordered_map<txn_id_t, WaitState> waiting_;
+    DeadlockPolicy policy_;
 };
 
 } // namespace engine

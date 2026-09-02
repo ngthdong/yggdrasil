@@ -1,9 +1,11 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
+#include "engine/lock_manager.h"
 #include "engine/status.h"
 
 namespace engine {
@@ -18,6 +20,11 @@ struct Options {
     bool create_if_missing = true;
 
     bool sync_on_commit = true;
+
+    DeadlockPolicy deadlock_policy = DeadlockPolicy::kWoundWait;
+
+    // Only used when deadlock_policy == DeadlockPolicy::kDetection.
+    std::chrono::milliseconds deadlock_detection_interval = std::chrono::milliseconds(50);
 
     Status Validate() const {
         if (path.empty()) {

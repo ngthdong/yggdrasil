@@ -44,6 +44,7 @@ add_library(yggdrasil
     src/recovery/undo_utils.cc
     src/txn/transaction.cc
     src/txn/lock_manager.cc
+    src/txn/deadlock_detector.cc
 )
 
 target_include_directories(yggdrasil
@@ -110,6 +111,7 @@ if(ENGINE_BUILD_TESTS)
         tests/unit/recovery/recovery_manager_test.cc
         tests/unit/txn/transaction_test.cc
         tests/unit/txn/lock_manager_test.cc
+        tests/unit/txn/deadlock_detector_test.cc
     )
 
     target_link_libraries(yggdrasil_unit_tests
@@ -130,6 +132,24 @@ if(ENGINE_BUILD_TESTS)
             GTest::gtest_main
             yggdrasil_project_options
     )
+
+    # ThreadSanitizer requires a specific address-space layout; on systems
+    # with high-entropy ASLR (e.g. modern Ubuntu kernels) this crashes
+    # instrumented binaries with "FATAL: unexpected memory mapping" before
+    # a single test runs. Route execution through `setarch -R` (disables
+    # ASLR for that process only) so both build-time test discovery and
+    # `ctest` work without requiring a system-wide sysctl change.
+    if(ENGINE_TSAN)
+        find_program(SETARCH_EXECUTABLE setarch)
+        if(SETARCH_EXECUTABLE)
+            set_target_properties(yggdrasil_unit_tests yggdrasil_integration_tests PROPERTIES
+                CROSSCOMPILING_EMULATOR "${SETARCH_EXECUTABLE};${CMAKE_SYSTEM_PROCESSOR};-R"
+            )
+        else()
+            message(WARNING "ENGINE_TSAN is ON but 'setarch' was not found; test discovery "
+                             "may crash under high-entropy ASLR.")
+        endif()
+    endif()
 
     include(GoogleTest)
     gtest_discover_tests(yggdrasil_unit_tests)

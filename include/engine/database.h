@@ -8,6 +8,7 @@
 #include "engine/bptree_iterator.h"
 #include "engine/buffer_pool_manager.h"
 #include "engine/checkpoint_manager.h"
+#include "engine/deadlock_detector.h"
 #include "engine/disk_manager.h"
 #include "engine/free_page_manager.h"
 #include "engine/lock_manager.h"
@@ -108,6 +109,7 @@ class Database {
     std::unique_ptr<WalManager> wal_manager_;
     std::unique_ptr<CheckpointManager> checkpoint_manager_;
     std::unique_ptr<LockManager> lock_manager_;
+    std::unique_ptr<DeadlockDetector> deadlock_detector_;
     std::mutex engine_mutex_;
 };
 
