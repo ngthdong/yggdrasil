@@ -39,7 +39,7 @@ struct Superblock {
     }
 
     static StatusOr<Superblock> DeserializeFrom(const char* buf, uint32_t buf_size) {
-        if (buf_size < 24) {
+        if (buf_size < 32) {
             return Status ::Corruption("superblock page too small to contain a header");
         }
         if (std::memcmp(buf, kSuperblockMagic, 4) != 0) {
