@@ -143,8 +143,8 @@ Status Transaction::Remove(const Slice& key) {
 }
 
 Status Transaction::Commit() {
-    if (finalized_) {
-        return Status::InvalidArgument("Transaction::Commit: already finalized.");
+    if (!is_active()) {
+        return Status::InvalidArgument("Transaction::Commit: transaction is not active.");
     }
     if (has_error_) {
         return Status::InvalidArgument("Transaction::Commit: this transaction hit a error earlier "
@@ -171,8 +171,8 @@ Status Transaction::Commit() {
 }
 
 Status Transaction::Rollback() {
-    if (finalized_) {
-        return Status::InvalidArgument("Transaction::Roolback: already finalized.");
+    if (!is_active()) {
+        return Status::InvalidArgument("Transaction::Rollback: transaction is not active.");
     }
     Status undo_s;
     {

@@ -262,6 +262,39 @@ TEST_F(TransactionTest, MoveConstructionTransfersActiveState) {
     EXPECT_EQ(db_->Get(Slice("a")).value(), "1");
 }
 
+// Regression test: Commit()/Rollback() used to only check `finalized_`, not
+// the full is_active() (which also covers moved_from_). That let a
+// moved-from Transaction re-finalize the txn_id_ it no longer owns --
+// appending a spurious Commit/Abort WAL record and prematurely decrementing
+// active_txn_count_ out from under the object that actually owns the
+// transaction now.
+TEST_F(TransactionTest, CommitOnAMovedFromTransactionFails) {
+    Transaction original = std::move(db_->BeginTransaction().value());
+    Transaction moved(std::move(original));
+
+    // NOLINTNEXTLINE(bugprone-use-after-move)
+    EXPECT_FALSE(original.Commit().ok());
+    EXPECT_TRUE(db_->has_active_transaction())
+        << "the moved-from object's Commit() must not finalize the live transaction";
+
+    ASSERT_TRUE(moved.Commit().ok());
+    EXPECT_FALSE(db_->has_active_transaction());
+}
+
+TEST_F(TransactionTest, RollbackOnAMovedFromTransactionFails) {
+    Transaction original = std::move(db_->BeginTransaction().value());
+    ASSERT_TRUE(original.Put(Slice("a"), Slice("1")).ok());
+    Transaction moved(std::move(original));
+
+    // NOLINTNEXTLINE(bugprone-use-after-move)
+    EXPECT_FALSE(original.Rollback().ok());
+    EXPECT_TRUE(db_->has_active_transaction())
+        << "the moved-from object's Rollback() must not finalize the live transaction";
+
+    ASSERT_TRUE(moved.Commit().ok());
+    EXPECT_EQ(db_->Get(Slice("a")).value(), "1");
+}
+
 TEST_F(TransactionTest, MoveAssignmentOverAnActiveTransactionRollsItBack) {
     Transaction txn = std::move(db_->BeginTransaction().value());
     ASSERT_TRUE(txn.Put(Slice("m"), Slice("1")).ok());
