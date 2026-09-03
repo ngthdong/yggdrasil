@@ -124,6 +124,7 @@ if(ENGINE_BUILD_TESTS)
     # Integration tests
     add_executable(yggdrasil_integration_tests
         tests/integration/database_api_test.cc
+        tests/integration/write_batch_test.cc
     )
 
     target_link_libraries(yggdrasil_integration_tests

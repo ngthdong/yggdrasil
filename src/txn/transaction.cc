@@ -164,6 +164,7 @@ Status Transaction::Commit() {
         }
     }
 
+    lock_manager_->ReleaseAllLocks(txn_id_);
     finalized_ = true;
     db_->OnTransactionFinalized(txn_id_);
     return Status::OK();
@@ -194,6 +195,7 @@ Status Transaction::Rollback() {
         }
     }
 
+    lock_manager_->ReleaseAllLocks(txn_id_);
     finalized_ = true;
     db_->OnTransactionFinalized(txn_id_);
     return Status::OK();

@@ -1,5 +1,6 @@
 #include "engine/database.h"
 #include <cstdio>
+#include <set>
 
 namespace engine {
 
@@ -314,6 +315,174 @@ StatusOr<Transaction> Database::BeginTransaction() {
                        &engine_mutex_,
                        txn_id,
                        options_.sync_on_commit);
+}
+
+Status Database::Write(const WriteBatch& batch) {
+    Status open_check = EnsureOpen();
+    if (!open_check.ok()) {
+        return open_check;
+    }
+    if (batch.empty()) {
+        return Status::OK();
+    }
+
+    txn_id_t txn_id;
+    {
+        std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+        Status txn_check = EnsureNoActiveTransaction();
+        if (!txn_check.ok()) {
+            return txn_check;
+        }
+        txn_id = next_txn_id_++;
+    }
+
+    // Sorted-order lock acquisition. This must happen without holding
+    // engine_mutex_: AcquireLock can block waiting on another transaction,
+    // and under wound-wait that transaction's rollback needs engine_mutex_
+    // to apply its logical undo before it can release the lock we're
+    // waiting on. Holding engine_mutex_ across this call would deadlock
+    // against that rollback.
+    std::set<std::string> unique_keys;
+    for (const auto& op : batch.ops_) {
+        unique_keys.insert(op.key);
+    }
+
+    std::vector<std::string> acquired_keys;
+    Status lock_s = Status::OK();
+    for (const auto& key : unique_keys) {
+        lock_s = lock_manager_->AcquireLock(txn_id, key, LockMode::kExclusive);
+        if (!lock_s.ok()) {
+            break;
+        }
+        acquired_keys.push_back(key);
+    }
+    if (!lock_s.ok()) {
+        lock_manager_->ReleaseAllLocks(txn_id);
+        return lock_s;
+    }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
+    // Without a Begin record, RecoveryManager::Analysis() never starts
+    // tracking this txn_id, so a crash between here and the Commit record
+    // below would leave Redo() replaying the partially-applied ops with no
+    // matching Undo() entry to roll them back.
+    StatusOr<lsn_t> begin_lsn_or = wal_manager_->AppendLogRecord(
+        LogRecordType::kBegin, kInvalidPageId, Slice(""), Slice(""), txn_id);
+    if (!begin_lsn_or.ok()) {
+        lock_manager_->ReleaseAllLocks(txn_id);
+        return begin_lsn_or.status();
+    }
+
+    // Apply original submisstion order.
+    std::vector<LogRecord> applied;
+    Status apply_s = Status::OK();
+    for (const auto& op : batch.ops_) {
+        if (op.type == LogRecordType::kInsert) {
+            // BPlusTree::Insert() rejects duplicate keys, so a batch
+            // touching the same key twice would fail on the second op
+            // without this upsert composition, mirroring Database::Put's
+            // own logic.
+            StatusOr<std::string> existing_or = tree_->Get(Slice(op.key));
+            if (existing_or.ok()) {
+                StatusOr<lsn_t> del_lsn_or =
+                    wal_manager_->AppendLogRecord(LogRecordType::kDelete,
+                                                  kInvalidPageId,
+                                                  Slice(op.key),
+                                                  Slice(existing_or.value()),
+                                                  txn_id);
+                if (!del_lsn_or.ok()) {
+                    apply_s = del_lsn_or.status();
+                    break;
+                }
+                lsn_t del_lsn = del_lsn_or.value();
+                apply_s = tree_->Remove(Slice(op.key), del_lsn);
+                if (!apply_s.ok()) {
+                    break;
+                }
+
+                LogRecord del_rec;
+                del_rec.lsn = del_lsn;
+                del_rec.txn_id = txn_id;
+                del_rec.type = LogRecordType::kDelete;
+                del_rec.key = op.key;
+                del_rec.value = existing_or.value();
+                applied.push_back(std::move(del_rec));
+            }
+            StatusOr<lsn_t> lsn_or = wal_manager_->AppendLogRecord(
+                LogRecordType::kInsert, kInvalidPageId, Slice(op.key), Slice(op.value), txn_id);
+            if (!lsn_or.ok()) {
+                apply_s = lsn_or.status();
+                break;
+            }
+            lsn_t lsn = lsn_or.value();
+            apply_s = tree_->Insert(Slice(op.key), Slice(op.value), lsn);
+            if (!apply_s.ok()) {
+                break;
+            }
+
+            LogRecord rec;
+            rec.lsn = lsn;
+            rec.txn_id = txn_id;
+            rec.type = LogRecordType::kInsert;
+            rec.key = op.key;
+            rec.value = op.value;
+            applied.push_back(std::move(rec));
+
+        } else { // kDelete
+            StatusOr<std::string> old_or = tree_->Get(Slice(op.key));
+            if (!old_or.ok()) {
+                continue;
+            }
+            StatusOr<lsn_t> lsn_or = wal_manager_->AppendLogRecord(LogRecordType::kDelete,
+                                                                   kInvalidPageId,
+                                                                   Slice(op.key),
+                                                                   Slice(old_or.value()),
+                                                                   txn_id);
+            if (!lsn_or.ok()) {
+                apply_s = lsn_or.status();
+                break;
+            }
+            lsn_t lsn = lsn_or.value();
+            apply_s = tree_->Remove(Slice(op.key), lsn);
+            if (!apply_s.ok()) {
+                break;
+            }
+
+            LogRecord rec;
+            rec.lsn = lsn;
+            rec.txn_id = txn_id;
+            rec.type = LogRecordType::kDelete;
+            rec.key = op.key;
+            rec.value = old_or.value();
+            applied.push_back(std::move(rec));
+        }
+    }
+
+    if (!apply_s.ok()) {
+        ApplyLogicalUndo(tree_.get(), applied);
+        lock_manager_->ReleaseAllLocks(txn_id);
+        return apply_s;
+    }
+
+    StatusOr<lsn_t> commit_lsn_or = wal_manager_->AppendLogRecord(
+        LogRecordType::kCommit, kInvalidPageId, Slice(""), Slice(""), txn_id);
+    if (!commit_lsn_or.ok()) {
+        ApplyLogicalUndo(tree_.get(), applied);
+        lock_manager_->ReleaseAllLocks(txn_id);
+        return commit_lsn_or.status();
+    }
+
+    if (options_.sync_on_commit) {
+        Status flush_s = wal_manager_->Flush(commit_lsn_or.value());
+        if (!flush_s.ok()) {
+            lock_manager_->ReleaseAllLocks(txn_id);
+            return flush_s;
+        }
+    }
+
+    lock_manager_->ReleaseAllLocks(txn_id);
+    return Status::OK();
 }
 
 } // namespace engine

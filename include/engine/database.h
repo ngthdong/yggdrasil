@@ -18,7 +18,9 @@
 #include "engine/stats.h"
 #include "engine/status.h"
 #include "engine/transaction.h"
+#include "engine/undo_utils.h"
 #include "engine/wal_manager.h"
+#include "engine/write_batch.h"
 
 namespace engine {
 
@@ -87,6 +89,8 @@ class Database {
     bool has_active_transaction() const {
         return active_txn_count_ > 0;
     }
+
+    Status Write(const WriteBatch& batch);
 
   private:
     friend class Transaction;
