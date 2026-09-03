@@ -1,4 +1,6 @@
 #include "engine/database.h"
+#include "engine/file_utils.h"
+
 #include <cstdio>
 #include <set>
 
@@ -483,6 +485,45 @@ Status Database::Write(const WriteBatch& batch) {
 
     lock_manager_->ReleaseAllLocks(txn_id);
     return Status::OK();
+}
+
+StatusOr<Snapshot> Database::CreateSnapshot() {
+    Status open_check = EnsureOpen();
+    if (!open_check.ok()) {
+        return open_check;
+    }
+
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+
+    // Persist all dirty pages before copying the database state so
+    // the snapshot is created from a consistent on-disk representation.
+    Status flush_s = buffer_pool_manager_->FlushAllPages();
+    if (!flush_s.ok()) {
+        return flush_s;
+    }
+
+    std::string snapshot_path = options_.path + ".snapshot." + std::to_string(next_snapshot_id_++);
+    Status copy_s = CopyFile(options_.path, snapshot_path); // raw POSIX read/write, 1 MiB chunks
+    if (!copy_s.ok()) {
+        return copy_s;
+    }
+
+    StatusOr<std::unique_ptr<DiskManager>> dm_or =
+        DiskManager::Open(snapshot_path, options_.page_size, /*create_if_missing=*/false);
+    if (!dm_or.ok()) {
+        std::remove(snapshot_path.c_str());
+        return dm_or.status();
+    }
+    auto snap_dm = std::move(dm_or.value());
+    auto snap_bpm = std::make_unique<BufferPoolManager>(snap_dm.get(), options_.buffer_pool_frames);
+    auto snap_fpm = std::make_unique<FreePageManager>(snap_dm.get(), snap_bpm.get());
+    auto snap_tree = std::make_unique<BPlusTree>(snap_dm.get(), snap_bpm.get(), snap_fpm.get());
+
+    return Snapshot(std::move(snap_dm),
+                    std::move(snap_bpm),
+                    std::move(snap_fpm),
+                    std::move(snap_tree),
+                    snapshot_path);
 }
 
 } // namespace engine

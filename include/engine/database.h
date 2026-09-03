@@ -15,6 +15,7 @@
 #include "engine/options.h"
 #include "engine/recovery_manager.h"
 #include "engine/slice.h"
+#include "engine/snapshot.h"
 #include "engine/stats.h"
 #include "engine/status.h"
 #include "engine/transaction.h"
@@ -92,6 +93,8 @@ class Database {
 
     Status Write(const WriteBatch& batch);
 
+    StatusOr<Snapshot> CreateSnapshot();
+
   private:
     friend class Transaction;
 
@@ -99,6 +102,7 @@ class Database {
     void OnTransactionFinalized(txn_id_t txn_id);
     txn_id_t next_txn_id_ = 1;
     txn_id_t active_txn_count_ = 0;
+    uint64_t next_snapshot_id_ = 1;
 
     Status EnsureOpen() const;
 

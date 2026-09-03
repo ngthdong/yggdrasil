@@ -27,7 +27,9 @@ engine_enable_sanitizers(yggdrasil_project_options)
 # Library
 add_library(yggdrasil
     src/database.cc
+    src/snapshot.cc
     src/storage/disk/disk_manager.cc
+    src/storage/disk/file_utils.cc
     src/storage/freespace/free_page_manager.cc
     src/storage/page/slotted_page.cc
     src/buffer/buffer_pool_manager.cc
@@ -125,6 +127,7 @@ if(ENGINE_BUILD_TESTS)
     add_executable(yggdrasil_integration_tests
         tests/integration/database_api_test.cc
         tests/integration/write_batch_test.cc
+        tests/integration/snapshot_test.cc
     )
 
     target_link_libraries(yggdrasil_integration_tests
