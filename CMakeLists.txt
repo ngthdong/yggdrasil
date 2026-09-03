@@ -32,6 +32,7 @@ add_library(yggdrasil
     src/storage/disk/file_utils.cc
     src/storage/freespace/free_page_manager.cc
     src/storage/page/slotted_page.cc
+    src/storage/crc32c.cc
     src/buffer/buffer_pool_manager.cc
     src/buffer/replacer/clock_replacer.cc
     src/buffer/replacer/lru_replacer.cc

@@ -291,5 +291,45 @@ TEST_F(DatabaseApiTest, LargeRandomizedWorkloadThroughPublicApiOnlyMatchesOracle
     EXPECT_EQ(oracle_it, oracle.end());
 }
 
+TEST_F(DatabaseApiTest, CorruptedPageSurfacesAsCleanErrorNotCrashOrWrongAnswer) {
+    {
+        Database db(ValidOptions());
+        ASSERT_TRUE(db.Open().ok());
+        for (int i = 0; i < 50; ++i) {
+            ASSERT_TRUE(
+                db.Put(Slice("k" + std::to_string(i)), Slice("v" + std::to_string(i))).ok());
+        }
+        ASSERT_TRUE(db.Checkpoint().ok());
+        ASSERT_TRUE(db.Close().ok());
+    }
+    // Corrupt a byte somewhere in the middle of the data file directly,
+    // bypassing the engine entirely.
+    {
+        FILE* f = std::fopen(path_.c_str(), "r+b");
+        ASSERT_NE(f, nullptr);
+        std::fseek(f, 600, SEEK_SET); // inside a real data page's slot, past the superblock
+        char c = 'X';
+        std::fwrite(&c, 1, 1, f);
+        std::fclose(f);
+    }
+    Database db(ValidOptions());
+    Status open_s = db.Open();
+    if (open_s.ok()) {
+        int corruption_reports = 0;
+        for (int i = 0; i < 50; ++i) {
+            auto v = db.Get(Slice("k" + std::to_string(i)));
+            if (!v.ok() && v.status().code() == Status::Code::kCorruption) {
+                ++corruption_reports;
+            } else if (v.ok()) {
+                EXPECT_EQ(v.value(), "v" + std::to_string(i));
+            }
+        }
+        EXPECT_GT(corruption_reports, 0)
+            << "the flipped byte should have surfaced as a Corruption on at least one read";
+    } else {
+        EXPECT_EQ(open_s.code(), Status::Code::kCorruption);
+    }
+}
+
 } // namespace
 } // namespace engine

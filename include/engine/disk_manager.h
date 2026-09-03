@@ -35,7 +35,7 @@ class DiskManager {
 
     // out_buf must point to at least page_size() writable bytes. Returns
     // Corruption on a short read rather than partially-read garbage.
-    Status ReadPage(page_id_t page_id, char* out_buf);
+    Status ReadPage(page_id_t page_id, char* out_buf) const;
 
     // in_buf must point to at least page_size() readable bytes.
     Status WritePage(page_id_t page_id, const char* in_buf);
@@ -81,10 +81,6 @@ class DiskManager {
 
     Status WriteSuperblock();
     Status SyncIfNeeded();
-
-    // Wrappers around pread/pwrite that loop on short reads/writes
-    Status PreadFull(void* buf, size_t count, off_t offset) const;
-    Status PwriteFull(const void* buf, size_t count, off_t offset) const;
 
     int fd_;
     Superblock superblock_;
