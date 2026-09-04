@@ -150,7 +150,8 @@ StatusOr<std::unique_ptr<DiskManager>> DiskManager::Open(const std::string& path
     // mismatch would make ReadChecksummedSlot below read the wrong stride --
     // misreading the file and surfacing as a spurious Corruption instead of
     // the InvalidArgument this is supposed to be.
-    constexpr size_t kSuperblockProbeSize = 32; // magic(4)+version(4)+page_size(4)+page_count(4)+free_list(4)+root(4)+lsn(8)
+    constexpr size_t kSuperblockProbeSize =
+        32; // magic(4)+version(4)+page_size(4)+page_count(4)+free_list(4)+root(4)+lsn(8)
     std::vector<char> probe_buf(kSuperblockProbeSize, 0);
     Status probe_s = PreadFullRaw(fd, probe_buf.data(), probe_buf.size(), 0);
     if (!probe_s.ok()) {

@@ -3,7 +3,7 @@
 #include <cstring>
 
 #include "engine/byte_utils.h"
-#include "engine/crc32.h"
+#include "engine/crc32c.h"
 
 namespace engine {
 
@@ -25,7 +25,7 @@ void LogRecord::AppendTo(std::string* buf) const {
     std::memcpy(p + off, value.data(), value.size());
     off += value.size();
 
-    uint32_t crc = Crc32(p, off); // checksum covers everything before the checksum field itself
+    uint32_t crc = Crc32c(p, off); // checksum covers everything before the checksum field itself
     PutU32(p + off, crc);
 }
 
@@ -54,7 +54,7 @@ LogRecord::ParseFrom(const char* buf, size_t buf_len, size_t offset, size_t* out
     }
 
     size_t record_len_before_checksum = after_value - offset;
-    uint32_t expected_crc = Crc32(p, record_len_before_checksum);
+    uint32_t expected_crc = Crc32c(p, record_len_before_checksum);
     uint32_t stored_crc = GetU32(buf + after_value);
     if (expected_crc != stored_crc) {
         return Status::Corruption(
