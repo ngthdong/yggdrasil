@@ -248,6 +248,8 @@ StatusOr<DBStats> Database::GetStats() {
     stats.buffer_pool_hits = buffer_pool_manager_->HitCount();
     stats.buffer_pool_misses = buffer_pool_manager_->MissCount();
     stats.tree_height = height_or.value();
+    stats.durable_lsn = wal_manager_->durable_lsn();
+    stats.last_checkpoint_lsn = disk_manager_->GetLastCheckpointLsn();
     return stats;
 }
 
